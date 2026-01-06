@@ -1,0 +1,320 @@
+{% extends 'crm/base.html' %}
+
+{% block title %}Gestão de Usuários - Mini-CRM{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="p-8 bg-gray-50 h-full overflow-y-auto">
+    <div class="max-w-6xl mx-auto">
+        <!-- Mensagens de Sucesso/Erro -->
+        {% if messages %}
+            {% for message in messages %}
+                <div class="mb-6 p-4 rounded-lg {% if message.tags %}{{ message.tags }}{% else %}bg-blue-100 border border-blue-200 text-blue-800{% endif %}"
+                     style="{% if message.tags == 'error' %}background-color: #fee2e2; border-color: #fecaca; color: #991b1b;{% elif message.tags == 'success' %}background-color: #d1fae5; border-color: #a7f3d0; color: #065f46;{% endif %}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8 flex-wrap gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">👥 Gestão de Usuários</h1>
+                <p class="text-gray-600 mt-1">Gerenciador de usuários, grupos e permissões</p>
+            </div>
+            <div class="flex gap-2 items-center flex-wrap">
+                <button onclick="abrirModalNovoUsuario()" class="btn-primary">
+                    <span class="inline-flex items-center gap-2"><i class="fa-solid fa-user-plus"></i><span>Novo Usuário</span></span>
+                </button>
+                <a href="{% url 'kanban' %}" class="btn-primary whitespace-nowrap">
+                    <span class="inline-flex items-center gap-2"><i class="fa-solid fa-arrow-left"></i><span>Voltar ao Kanban</span></span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Cards de Resumo -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div class="card p-4">
+                <div class="text-gray-600 text-[11px] font-medium mb-1">Total de Usuários</div>
+                <div class="text-xl font-bold text-gray-800">{{ usuarios|length }}</div>
+            </div>
+            <div class="card p-4">
+                <div class="text-gray-600 text-[11px] font-medium mb-1">Administradores</div>
+                <div class="text-xl font-bold text-gray-800">
+                    {% with admin_count=usuarios|dictsort:"is_superuser"|last %}
+                        {% if admin_count %}1{% else %}0{% endif %}
+                    {% endwith %}
+                </div>
+            </div>
+            <div class="card p-4">
+                <div class="text-gray-600 text-[11px] font-medium mb-1">Vendedores Ativos</div>
+                <div class="text-xl font-bold text-gray-800">
+                    {% with active_users=usuarios|length|add:"-1" %}{{ active_users }}{% endwith %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabela de Usuários -->
+        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <h2 class="text-lg font-bold text-gray-800">📋 Lista de Usuários</h2>
+            </div>
+
+            {% if usuarios %}
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 border-b border-gray-200">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700">Usuário</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700">Email</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700">Tipo</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700">Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700">Cadastrado em</th>
+                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-700">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for usuario in usuarios %}
+                        <tr class="border-b border-gray-200 hover:bg-gray-50 transition">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-10 h-10 rounded-full text-white font-bold flex items-center justify-center" style="background-color: #018aa7;">
+                                        {{ usuario.username|first|upper }}
+                                    </div>
+                                    <div>
+                                        <p class="font-medium text-gray-800">{{ usuario.get_full_name|default:usuario.username }}</p>
+                                        <p class="text-xs text-gray-500">@{{ usuario.username }}</p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-700">
+                                {{ usuario.email|default:"—" }}
+                            </td>
+                            <td class="px-6 py-4">
+                                {% if usuario.is_superuser %}
+                                    <span class="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800"><i class="fa-solid fa-user-tie mr-1"></i>Administrador</span>
+                                {% else %}
+                                    {% if usuario.groups.all|length > 0 %}
+                                        <span class="inline-block px-3 py-1 rounded-full text-xs font-semibold" style="background-color: rgba(1, 138, 167, 0.1); color: #018aa7;"><i class="fa-solid fa-layer-group mr-1"></i>{{ usuario.groups.first.name }}</span>
+                                    {% else %}
+                                        <span class="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">Sem grupo</span>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4">
+                                {% if usuario.is_active %}
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                                        <i class="fa-solid fa-circle-check mr-1"></i>Ativo
+                                    </span>
+                                {% else %}
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                                        <i class="fa-solid fa-circle-xmark mr-1"></i>Inativo
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-600">
+                                {{ usuario.date_joined|date:"d/m/Y H:i" }}
+                            </td>
+                            <td class="px-6 py-4 text-center">
+                                <div class="flex justify-center gap-2">
+                                    {% if usuario.id != request.user.id %}
+                                    <button onclick="abrirModalEditarUsuario({{ usuario.id }}, '{{ usuario.get_full_name|default:usuario.username }}', '{{ usuario.username }}', '{{ usuario.email }}', '{{ usuario.is_superuser }}')"
+                                            class="btn-secondary btn-sm inline-flex items-center gap-1">
+                                        <i class="fa-solid fa-pen-to-square"></i><span>Editar</span>
+                                    </button>
+                                    <button onclick="confirmarDelecao({{ usuario.id }}, '{{ usuario.username }}')" 
+                                            class="btn-danger btn-sm inline-flex items-center gap-1">
+                                        <i class="fa-solid fa-trash"></i><span>Deletar</span>
+                                    </button>
+                                    {% else %}
+                                    <span class="text-xs text-gray-500">Sua conta (sem ações)</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Paginação -->
+            {% if paginator.num_pages > 1 %}
+            <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-center items-center gap-2 flex-wrap">
+                {% if page_obj.has_previous %}
+                <a href="?page=1" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angles-left"></i>
+                </a>
+                <a href="?page={{ page_obj.previous_page_number }}" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angle-left"></i>
+                </a>
+                {% else %}
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angles-left"></i>
+                </button>
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angle-left"></i>
+                </button>
+                {% endif %}
+                
+                <span class="text-xs font-medium text-gray-700">
+                    Página {{ page_obj.number }} de {{ paginator.num_pages }}
+                </span>
+                
+                {% if page_obj.has_next %}
+                <a href="?page={{ page_obj.next_page_number }}" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angle-right"></i>
+                </a>
+                <a href="?page={{ paginator.num_pages }}" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angles-right"></i>
+                </a>
+                {% else %}
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angle-right"></i>
+                </button>
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angles-right"></i>
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="px-6 py-12 text-center">
+                <p class="text-gray-500 text-sm">Nenhum usuário encontrado.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Novo/Editar Usuário -->
+<div id="modalUsuario" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center" onclick="if(event.target.id === 'modalUsuario') fecharModal()">
+    <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+        <div class="p-6 border-b border-gray-200 sticky top-0 bg-white">
+            <h3 id="modalTitulo" class="text-xl font-bold text-gray-800">Novo Usuário</h3>
+        </div>
+        
+        <form id="formUsuario" method="post" action="{% url 'criar_usuario' %}" class="p-6 space-y-4">
+            {% csrf_token %}
+            <input type="hidden" id="usuarioId" name="usuario_id" value="">
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Nome Completo</label>
+                <input type="text" id="fullname" name="first_name" required
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Usuário</label>
+                <input type="text" id="username" name="username" required
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input type="email" id="email" name="email" required
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Senha</label>
+                <input type="password" id="password" name="password"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                       placeholder="Deixe em branco para não alterar">
+                <p id="pwdHint" class="text-xs text-gray-500 mt-1">Deixe em branco para manter a senha atual</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Tipo de Acesso</label>
+                <select id="grupo" name="grupo"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">— Nenhum (Apenas Administrador) —</option>
+                    <option value="Comercial">Comercial (Vendedor)</option>
+                    <option value="Comercial">Comercial + Administrador (Vendedor + Gestor)</option>
+                </select>
+                <p id="grupoHint" class="text-xs text-gray-500 mt-1">Admin puro: só gerencia. Admin + Comercial: gerencia e aparece no Kanban</p>
+            </div>
+
+            <div class="border-t border-gray-200 pt-4">
+                <label class="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" id="isAdmin" name="is_superuser"
+                           class="w-4 h-4 rounded border-gray-300 focus:ring-2 focus:ring-blue-500">
+                    <span class="text-sm font-medium text-gray-700">Administrador do Sistema</span>
+                </label>
+                <p class="text-xs text-gray-500 mt-2 ml-7">Acesso total ao sistema, gestão de usuários, CSV e métricas</p>
+            </div>
+
+            <div class="flex gap-3 pt-4">
+                <button type="submit" id="btnSubmit" class="flex-1 btn-primary">
+                    Salvar
+                </button>
+                <button type="button" onclick="fecharModal()" class="flex-1 btn-secondary">
+                    Cancelar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function abrirModalNovoUsuario() {
+    document.getElementById('modalTitulo').textContent = 'Novo Usuário';
+    document.getElementById('formUsuario').reset();
+    document.getElementById('usuarioId').value = '';
+    document.getElementById('password').required = true;
+    document.getElementById('pwdHint').style.display = 'none';
+    document.getElementById('username').disabled = false;
+    document.getElementById('formUsuario').action = '{% url "criar_usuario" %}';
+    document.getElementById('modalUsuario').classList.remove('hidden');
+    document.getElementById('fullname').focus();
+}
+
+function abrirModalEditarUsuario(usuarioId, fullname, username, email, isAdmin) {
+    document.getElementById('modalTitulo').textContent = 'Editar Usuário';
+    document.getElementById('usuarioId').value = usuarioId;
+    document.getElementById('fullname').value = fullname;
+    document.getElementById('username').value = username;
+    document.getElementById('username').disabled = true;
+    document.getElementById('email').value = email;
+    document.getElementById('password').required = false;
+    document.getElementById('password').value = '';
+    document.getElementById('pwdHint').style.display = 'block';
+    document.getElementById('isAdmin').checked = isAdmin === 'True';
+    document.getElementById('formUsuario').action = '{% url "criar_usuario" %}';
+    document.getElementById('modalUsuario').classList.remove('hidden');
+    document.getElementById('password').focus();
+}
+
+function toggleAdminGroup() {
+    // Administrador agora pode escolher se também é vendedor
+    // Campo "Tipo de Acesso" fica sempre habilitado
+}
+
+function confirmarDelecao(usuarioId, username) {
+    if (confirm(`Tem certeza que deseja deletar o usuário "${username}"?`)) {
+        // Criar formulário POST dinamicamente
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `/crm/deletar-usuario/${usuarioId}/`;
+        
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrfmiddlewaretoken';
+        csrfInput.value = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        
+        form.appendChild(csrfInput);
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function fecharModal() {
+    document.getElementById('modalUsuario').classList.add('hidden');
+}
+
+// Fechar modal com ESC
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') fecharModal();
+});
+</script>
+
+{% endblock %}

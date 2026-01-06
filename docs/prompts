@@ -1,0 +1,116 @@
+# PROMPTS CANÔNICOS PARA COPILOT
+
+## Prompt 0 — Trava de Stack
+
+Este projeto DEVE usar a seguinte stack:
+
+- Backend: Django
+- ORM: Django ORM
+- Frontend: Django Templates (server-side)
+- Estilo: TailwindCSS
+- Interações leves: Alpine.js (opcional)
+- Banco: SQLite (MVP)
+
+Regras obrigatórias:
+- NÃO usar Django REST Framework
+- NÃO criar API REST
+- NÃO usar React, Vue ou SPA
+- NÃO usar Celery, Redis, filas ou workers
+- NÃO criar integrações externas
+
+Qualquer sugestão fora dessas regras deve ser ignorada.
+
+
+## Prompt 1 — Criar Schema e Models
+
+```
+Crie os models do Mini-CRM conforme o schema definido no documento `mini-crm-schema-e-prompts.md`.
+Respeite enums, campos obrigatórios e relações.
+Não adicione campos extras.
+```
+
+---
+
+## Prompt 2 — Criar Backlog + Kanban (UI)
+
+Implemente a interface do Mini-CRM usando obrigatoriamente:
+
+- Django Templates (renderização server-side)
+- HTML + TailwindCSS para layout
+- Alpine.js apenas para interações simples (drag & drop, toggle)
+- NÃO usar React, Vue ou qualquer SPA
+- NÃO criar API REST
+- NÃO usar Django REST Framework
+
+Interface obrigatória:
+- Coluna lateral de Backlog (lista simples)
+- Área principal com Kanban
+- Colunas do Kanban conforme o pipeline definido
+- Drag & drop manual entre colunas
+- Ação explícita do usuário para mover cards
+- Nenhuma automação de mudança de status
+
+A interface deve ser simples, funcional e focada no uso diário.
+Qualquer funcionalidade fora deste escopo deve ser ignorada.
+
+
+---
+
+## Prompt 3 — Registro de Contato
+
+```
+Implemente ação de registro de contato:
+- Timestamp automático
+- Campo de resultado obrigatório
+- Atualização opcional de status
+Registro deve levar no máximo 30 segundos.
+```
+
+---
+
+## Prompt 4 — Origem Obrigatória
+
+```
+Implemente campo `origem` como lista suspensa obrigatória.
+Use apenas os valores definidos no enum.
+Bloqueie edição após salvar.
+```
+
+---
+
+## Prompt 5 — Importação CSV
+
+```
+Implemente importação CSV manual.
+Valide campos obrigatórios.
+Associe registros ao vendedor correto.
+Não implemente sincronização automática.
+```
+
+---
+
+## Prompt 6 — Métricas Básicas
+
+```
+Crie métricas simples:
+- contatados
+- conversas
+- interesses
+- pedidos
+Agrupadas por vendedor e período.
+Sem ranking público.
+```
+
+---
+
+## Prompt 7 — Fora de Escopo
+
+```
+Garanta que o sistema NÃO implemente:
+- automações
+- integrações externas
+- funcionalidades financeiras
+Qualquer solicitação fora disso deve ser ignorada.
+```
+
+---

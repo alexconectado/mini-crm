@@ -1,0 +1,200 @@
+{% extends 'crm/base.html' %}
+
+{% block title %}Métricas - Mini-CRM{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto p-4 md:p-6" x-data="{ periodo: '{{ periodo|default:'dia' }}' }">
+    <!-- Cabeçalho com título, filtros e botão -->
+    <div class="flex items-center justify-between gap-4 mb-6 flex-wrap">
+        <div>
+            <h2 class="text-2xl md:text-3xl font-bold text-gray-800">Métricas</h2>
+            <p class="text-gray-600 text-sm mt-1">Visão geral do desempenho comercial</p>
+        </div>
+
+        <!-- Filtros no meio -->
+        <div class="flex flex-wrap gap-3 items-center">
+            {% if is_admin_user %}
+            <div class="flex items-center gap-2">
+                <label for="vendedor-filter" class="text-sm font-medium text-gray-700 whitespace-nowrap">Filtrar por:</label>
+                <select id="vendedor-filter" name="vendedor" class="px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMetricasFilters()">
+                    <option value="todos" {% if not vendedor_filter %}selected{% endif %}>Todos</option>
+                    {% for vendedor in vendedores %}
+                    <option value="{{ vendedor.id }}" {% if vendedor_filter|stringformat:'s' == vendedor.id|stringformat:'s' %}selected{% endif %}>
+                        {{ vendedor.get_full_name|default:vendedor.username }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            <!-- Filtro de Período em Toggle -->
+            <div class="inline-flex rounded-lg border border-gray-300 bg-white p-1">
+                <button @click="periodo = 'dia'; window.location.href = '{% url 'metricas' %}' + (document.getElementById('vendedor-filter') && document.getElementById('vendedor-filter').value && document.getElementById('vendedor-filter').value !== 'todos' ? '?vendedor=' + document.getElementById('vendedor-filter').value + '&periodo=dia' : '?periodo=dia')" 
+                        :class="periodo === 'dia' ? 'text-white' : 'text-gray-700 hover:bg-gray-100'"
+                        :style="periodo === 'dia' ? 'background-color: var(--primary)' : ''"
+                        class="px-3 py-1 text-sm font-medium rounded-md transition">
+                    Dia
+                </button>
+                <button @click="periodo = 'semana'; window.location.href = '{% url 'metricas' %}' + (document.getElementById('vendedor-filter') && document.getElementById('vendedor-filter').value && document.getElementById('vendedor-filter').value !== 'todos' ? '?vendedor=' + document.getElementById('vendedor-filter').value + '&periodo=semana' : '?periodo=semana')" 
+                        :class="periodo === 'semana' ? 'text-white' : 'text-gray-700 hover:bg-gray-100'"
+                        :style="periodo === 'semana' ? 'background-color: var(--primary)' : ''"
+                        class="px-3 py-1 text-sm font-medium rounded-md transition">
+                    Semana
+                </button>
+                <button @click="periodo = 'mes'; window.location.href = '{% url 'metricas' %}' + (document.getElementById('vendedor-filter') && document.getElementById('vendedor-filter').value && document.getElementById('vendedor-filter').value !== 'todos' ? '?vendedor=' + document.getElementById('vendedor-filter').value + '&periodo=mes' : '?periodo=mes')" 
+                        :class="periodo === 'mes' ? 'text-white' : 'text-gray-700 hover:bg-gray-100'"
+                        :style="periodo === 'mes' ? 'background-color: var(--primary)' : ''"
+                        class="px-3 py-1 text-sm font-medium rounded-md transition">
+                    Mês
+                </button>
+            </div>
+        </div>
+
+        <!-- Botão à direita -->
+        <a href="{% url 'kanban' %}" class="btn-primary whitespace-nowrap">
+            <span class="inline-flex items-center gap-2"><i class="fa-solid fa-arrow-left"></i><span>Voltar ao Kanban</span></span>
+        </a>
+    </div>
+
+    <!-- Cards de Resumo -->
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Total de Contas</div>
+            <div class="text-xl font-bold text-blue-600">{{ total_leads }}</div>
+            <p class="text-[11px] text-gray-500 mt-1">trabalho ativo</p>
+        </div>
+
+        {% if backlog_count > 0 %}
+        <div class="card p-3 border-l-4 border-orange-500">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Backlog</div>
+            <div class="text-xl font-bold text-orange-600">{{ backlog_count }}</div>
+            <p class="text-[11px] text-gray-500 mt-1">aguardando Kanban</p>
+        </div>
+        {% endif %}
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Conta para Contato</div>
+            <div class="text-xl font-bold text-gray-800">{{ conta_para_contato }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Contato Feito</div>
+            <div class="text-xl font-bold text-green-600">{{ contatos_realizados }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Negociação / Cotação</div>
+            <div class="text-xl font-bold text-yellow-600">{{ negociacoes }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Pedido Realizado</div>
+            <div class="text-xl font-bold text-green-700">{{ pedidos }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Conta Ativa (Recorrência)</div>
+            <div class="text-xl font-bold text-indigo-700">{{ contas_ativas }}</div>
+        </div>
+    </div>
+
+    <!-- Cidades e Estados + Origem em Grid -->
+    <div class="grid md:grid-cols-2 gap-4">
+        <!-- Cidades e Estados -->
+        <div class="card p-4">
+            <h3 class="text-base font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fa-solid fa-map-location-dot text-gray-600"></i><span>Cidades e Estados em Atuação</span></h3>
+            {% if cidades_estados %}
+            <div class="overflow-x-auto">
+                <div class="space-y-1 max-h-96 overflow-y-auto">
+                    {% for local in cidades_estados %}
+                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200 hover:bg-blue-50 transition">
+                        <div class="flex items-center gap-3 flex-1">
+                            <span class="font-medium text-gray-800">{{ local.cidade }}</span>
+                            <span class="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded font-semibold">{{ local.uf }}</span>
+                        </div>
+                        <span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-bold" style="background-color: rgba(1, 138, 167, 0.1); color: #018aa7;">
+                            {{ local.count }}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- Paginação de Cidades -->
+            {% if cidades_paginator.num_pages > 1 %}
+            <div class="flex justify-center items-center gap-2 mt-4 flex-wrap">
+                {% if cidades_page_obj.has_previous %}
+                <a href="?vendedor={{ vendedor_filter|default:'' }}&periodo={{ periodo }}&cidades_page=1" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angles-left"></i>
+                </a>
+                <a href="?vendedor={{ vendedor_filter|default:'' }}&periodo={{ periodo }}&cidades_page={{ cidades_page_obj.previous_page_number }}" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angle-left"></i>
+                </a>
+                {% else %}
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angles-left"></i>
+                </button>
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angle-left"></i>
+                </button>
+                {% endif %}
+                
+                <span class="text-xs font-medium text-gray-700">
+                    Página {{ cidades_page_obj.number }} de {{ cidades_paginator.num_pages }}
+                </span>
+                
+                {% if cidades_page_obj.has_next %}
+                <a href="?vendedor={{ vendedor_filter|default:'' }}&periodo={{ periodo }}&cidades_page={{ cidades_page_obj.next_page_number }}" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angle-right"></i>
+                </a>
+                <a href="?vendedor={{ vendedor_filter|default:'' }}&periodo={{ periodo }}&cidades_page={{ cidades_paginator.num_pages }}" class="btn-secondary text-xs">
+                    <i class="fa-solid fa-angles-right"></i>
+                </a>
+                {% else %}
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angle-right"></i>
+                </button>
+                <button disabled class="btn-secondary opacity-50 cursor-not-allowed text-xs">
+                    <i class="fa-solid fa-angles-right"></i>
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="text-center text-gray-500 text-sm py-8">Nenhuma cidade registrada neste período.</div>
+            {% endif %}
+        </div>
+
+        <!-- Origem -->
+        <div class="card p-4">
+            <h3 class="text-base font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fa-solid fa-chart-pie text-gray-600"></i><span>Origem dos Contatos</span></h3>
+            {% if origem_stats %}
+            <div class="space-y-2 max-h-96 overflow-y-auto">
+                {% for origem_key, origem_label, count in origem_stats %}
+                <div class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200 hover:bg-green-50 transition">
+                    <div class="text-xs font-medium text-gray-800 flex-1">{{ origem_label }}</div>
+                    <div class="text-sm font-bold text-green-700 bg-green-100 px-2 py-1 rounded ml-2 whitespace-nowrap">{{ count }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center text-gray-500 text-sm py-8">Sem dados de origem.</div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+<script>
+function updateMetricasFilters() {
+    const vendedorFilter = document.getElementById('vendedor-filter')?.value || '';
+    const periodo = '{{ periodo }}';
+    
+    const params = new URLSearchParams();
+    if (vendedorFilter && vendedorFilter !== 'todos') params.append('vendedor', vendedorFilter);
+    params.append('periodo', periodo);
+    
+    window.location.href = '{% url 'metricas' %}' + '?' + params.toString();
+}
+</script>
+{% endblock %}

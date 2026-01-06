@@ -1,0 +1,78 @@
+<!-- CARD KANBAN - REFATORADO PARA UX + PERFORMANCE -->
+<div class="bg-white border border-gray-200 rounded-md p-2 hover:shadow-md transition cursor-move text-sm h-fit group" 
+     id="card-{{ registro.id }}" 
+     draggable="true" 
+     @dragstart="dragStart($event, '{{ registro.id }}')" 
+     @dragend="dragEnd($event)" 
+     @dblclick="window.location.href='{% url 'registrar_contato' registro.id %}'">
+    
+    <!-- HEADER: Nome + Origem Badge + Menu -->
+    <div class="flex justify-between items-start gap-2 mb-1.5">
+        <div class="flex-1 min-w-0">
+            <h4 class="font-semibold text-gray-800 text-xs leading-tight truncate" title="{{ registro.nome_empresa }}">
+                {{ registro.nome_empresa }}
+            </h4>
+            <span class="inline-block text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium mt-1">
+                {{ registro.get_origem_display }}
+            </span>
+        </div>
+        
+        <!-- Menu Context (⋮) - Ações Secundárias -->
+        <div class="relative opacity-0 group-hover:opacity-100 transition-opacity">
+            <button @click="toggleCardMenu('{{ registro.id }}')"
+                    class="p-1 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800"
+                    title="Mais opções">
+                <i class="fa-solid fa-ellipsis-v text-xs"></i>
+            </button>
+            <div x-show="cardMenuOpen === '{{ registro.id }}'" 
+                 @click.outside="cardMenuOpen = null"
+                 class="absolute right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 min-w-max text-xs">
+                <button @click="moverParaBacklog('{{ registro.id }}'); cardMenuOpen = null"
+                        class="block w-full text-left px-3 py-1.5 hover:bg-gray-100 text-gray-700">
+                    <i class="fa-solid fa-arrow-left mr-2 text-gray-500"></i>Retornar
+                </button>
+                <button @click="arquivar('{{ registro.id }}'); cardMenuOpen = null"
+                        class="block w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-700 border-t border-gray-200">
+                    <i class="fa-solid fa-trash mr-2 text-red-500"></i>Arquivar
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- CONTEÚDO PRINCIPAL (Visível) -->
+    <div class="space-y-1 mb-2">
+        <!-- Telefone: Clicável com Ícone de WhatsApp -->
+        <a href="https://wa.me/{{ registro.telefone|slugify }}" 
+           target="_blank"
+           rel="noopener"
+           class="inline-flex items-center gap-1.5 text-xs text-gray-700 hover:text-green-600 hover:underline transition"
+           title="Enviar mensagem WhatsApp">
+            <i class="fa-brands fa-whatsapp text-green-500 text-sm"></i>
+            <span>{{ registro.telefone }}</span>
+        </a>
+        
+        <!-- Canal de Contato: Ícone com Tooltip -->
+        <div class="flex items-center gap-1 text-[10px] text-gray-600">
+            <i class="fa-solid fa-phone text-gray-500" title="Canal: {{ registro.get_canal_contato_display }}"></i>
+            <span title="Canal: {{ registro.get_canal_contato_display }}">{{ registro.get_canal_contato_display|truncatewords:1 }}</span>
+        </div>
+    </div>
+    
+    <!-- CONTEÚDO HOVER (Oculto por padrão) -->
+    <div class="hidden group-hover:block text-[10px] text-gray-600 space-y-0.5 mb-2 pb-2 border-t border-gray-200 pt-1">
+        <div><i class="fa-solid fa-location-dot mr-1 text-gray-400 text-[9px]"></i><span title="{{ registro.cidade }}/{{ registro.uf }}">{{ registro.cidade }}/{{ registro.uf }}</span></div>
+        <div><i class="fa-solid fa-user mr-1 text-gray-400 text-[9px]"></i><span title="{{ registro.vendedor.get_full_name|default:registro.vendedor.username }}">{{ registro.vendedor.get_full_name|default:registro.vendedor.username|truncatewords:2 }}</span></div>
+    </div>
+    
+    <!-- BOTÃO PRINCIPAL: Avançar -->
+    <a href="{% url 'registrar_contato' registro.id %}" 
+       class="block w-full bg-green-500 hover:bg-green-600 text-white text-xs py-1.5 px-2 rounded font-semibold text-center transition">
+        <span class="inline-flex items-center justify-center gap-1"><i class="fa-solid fa-arrow-right text-[10px]"></i>Avançar</span>
+    </a>
+</div>
+
+<!-- CSS ADICIONAL (adicionar a <style> no template pai) -->
+<style>
+.group:hover .group-hover\:block { display: block; }
+.group:hover .group-hover\:opacity-100 { opacity: 1; }
+</style>

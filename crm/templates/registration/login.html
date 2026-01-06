@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Mini-CRM Zandomax</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --primary: #018aa7;
+            --primary-hover: #016b84;
+            --primary-light: #e0f2f7;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--primary-light) 0%, #f0f9fb 100%);
+            min-height: 100vh;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+            box-shadow: 0 4px 12px rgba(1, 138, 167, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 1.5px solid #e5e7eb;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        .logo-container {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .errorlist {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 1rem 0;
+        }
+
+        .errorlist li {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .success-message {
+            background-color: #d1fae5;
+            border: 1px solid #a7f3d0;
+            color: #065f46;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            margin: 1.5rem 0;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background-color: #e5e7eb;
+        }
+
+        .divider span {
+            padding: 0 1rem;
+            color: #9ca3af;
+            font-size: 0.875rem;
+        }
+
+        .signup-link {
+            text-align: center;
+            margin-top: 1.5rem;
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+
+        .signup-link a {
+            color: var(--primary);
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .signup-link a:hover {
+            text-decoration: underline;
+        }
+
+        [type="checkbox"] {
+            accent-color: var(--primary);
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="flex items-center justify-center min-h-screen px-4">
+        <div class="w-full max-w-md">
+            <!-- Card de Login -->
+            <div class="login-card p-8">
+                <!-- Logo -->
+                <div class="logo-container">
+                    <img src="https://zandomax.agilecdn.com.br/imgs/logo-zandomax-alta-1715871858.png" alt="Zandomax" class="h-10 mx-auto mb-4">
+                    <p class="text-sm text-gray-500 mt-1">Sistema de Gestão de Vendas</p>
+                </div>
+
+                <!-- Mensagens - NÃO MOSTRAR AQUI -->
+                {% if messages %}
+                    <!-- Mensagens ignoradas na página de login -->
+                {% endif %}
+
+                <!-- Formulário -->
+                <form method="post" class="space-y-4">
+                    {% csrf_token %}
+
+                    {% if form.non_field_errors %}
+                        <div class="errorlist">
+                            {% for error in form.non_field_errors %}
+                                <li>{{ error }}</li>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
+                    <!-- Username -->
+                    <div class="form-group">
+                        <label for="id_username">Usuário</label>
+                        <input 
+                            type="text" 
+                            name="username" 
+                            id="id_username"
+                            placeholder="seu_usuario"
+                            required
+                            autofocus
+                            class="{% if form.username.errors %}border-red-500{% endif %}">
+                        {% if form.username.errors %}
+                            <div class="errorlist mt-1">
+                                {% for error in form.username.errors %}
+                                    <li>{{ error }}</li>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Password -->
+                    <div class="form-group">
+                        <label for="id_password">Senha</label>
+                        <input 
+                            type="password" 
+                            name="password" 
+                            id="id_password"
+                            placeholder="••••••••"
+                            required
+                            class="{% if form.password.errors %}border-red-500{% endif %}">
+                        {% if form.password.errors %}
+                            <div class="errorlist mt-1">
+                                {% for error in form.password.errors %}
+                                    <li>{{ error }}</li>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Remember Me -->
+                    <div class="form-group">
+                        <label class="remember-me">
+                            <input type="checkbox" name="remember_me" id="remember_me">
+                            <span>Lembrar-me neste dispositivo</span>
+                        </label>
+                    </div>
+
+                    <!-- Botão Login -->
+                    <button type="submit" class="btn-primary mt-6">
+                        Entrar
+                    </button>
+                </form>
+
+                <!-- Footer -->
+                <div class="text-center mt-6 text-sm text-gray-600 border-t pt-4">
+                    <p>Zandomax © 2026</p>
+                    <p class="text-xs text-gray-500 mt-1">Sistema de Gestão de Vendas</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

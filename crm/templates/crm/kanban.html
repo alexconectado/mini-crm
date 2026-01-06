@@ -1,0 +1,610 @@
+{% extends 'crm/base.html' %}
+{% load crm_filters %}
+
+{% block title %}Kanban - Mini-CRM{% endblock %}
+
+{% block content %}
+<div class="flex h-full" x-data="kanbanApp()" @cardUpdated="location.reload()">
+    <!-- BACKLOG LATERAL - TOGGLE -->
+    <aside class="bg-white shadow-lg overflow-y-auto border-r border-gray-200 transition-all duration-300"
+           :class="sidebarAberto ? 'w-64 lg:w-72' : 'w-20'"
+           x-init="sidebarAberto = true">
+        <div class="p-4 bg-white border-b-2 sticky top-0 z-10" style="border-bottom-color: #018aa7;">
+            <div class="flex items-center justify-between">
+                <div x-show="sidebarAberto" class="flex-1">
+                    <h2 class="text-lg font-bold text-gray-800">Base de Leads</h2>
+                    <p class="text-xs text-gray-500 mt-1">{{ backlog_count }} registro(s)</p>
+                </div>
+                <button @click="sidebarAberto = !sidebarAberto" 
+                        class="p-2 hover:bg-gray-100 rounded transition"
+                        title="Toggle sidebar">
+                    <i x-show="sidebarAberto" class="fa-solid fa-chevron-left text-gray-700"></i>
+                    <i x-show="!sidebarAberto" class="fa-solid fa-bars text-gray-700"></i>
+                </button>
+            </div>
+        </div>
+        
+        {% if user.is_superuser and vendedores %}
+        <!-- Filtro por Vendedor (Admin Only) -->
+        <div x-show="sidebarAberto" class="p-3 border-b border-gray-200 bg-blue-50">
+            <label class="block text-xs font-semibold text-gray-700 mb-1">Filtrar por Vendedor</label>
+            <select onchange="window.location.href = '{% url 'kanban' %}' + (this.value && this.value !== 'todos' ? '?vendedor=' + this.value : '')" class="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                <option value="todos" {% if not vendedor_filter or vendedor_filter == 'todos' %}selected{% endif %}>🌐 Todos os Vendedores</option>
+                {% for vendedor in vendedores %}
+                <option value="{{ vendedor.id }}" {% if vendedor_filter|stringformat:'s' == vendedor.id|stringformat:'s' %}selected{% endif %}>
+                    {{ vendedor.get_full_name|default:vendedor.username }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        
+        <!-- Cadastro rápido -->
+        <div x-show="sidebarAberto" class="p-3 border-b border-gray-200 bg-gray-50 space-y-2">
+            <form method="post" action="{% url 'criar_registro' %}" class="space-y-2 text-[11px] text-gray-700">
+                {% csrf_token %}
+                <div class="space-y-1">
+                    <input name="nome_empresa" placeholder="Nome da empresa *" required class="w-full px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                    <input name="telefone" placeholder="Telefone *" required class="w-full px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                    <div class="flex gap-2">
+                        <input name="cidade" placeholder="Cidade *" required class="flex-1 px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                        <input name="uf" placeholder="UF" maxlength="2" required class="w-16 px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-center uppercase bg-white">
+                    </div>
+                    <select name="origem" required class="w-full px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                        <option value="">Origem *</option>
+                        {% for origem_key, origem_label in origem_choices %}
+                        <option value="{{ origem_key }}">{{ origem_label }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="canal_contato" required class="w-full px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                        <option value="">Canal de contato *</option>
+                        {% for canal_key, canal_label in canal_choices %}
+                        <option value="{{ canal_key }}">{{ canal_label }}</option>
+                        {% endfor %}
+                    </select>
+                    <input name="codigo_winthor" placeholder="Código Winthor (opcional)" class="w-full px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                </div>
+                <button style="background-color: #018aa7;" class="w-full hover:opacity-90 text-white py-1.5 rounded text-xs font-semibold">+ Adicionar Lead</button>
+            </form>
+        </div>
+
+        <!-- Botão Importar CSV -->
+        <div class="px-3 py-2 border-t border-gray-200">
+            <button 
+                @click="mostrarModalCSV = true"
+                style="background-color: #018aa7;" 
+                class="w-full hover:opacity-90 text-white py-2 rounded text-xs font-semibold text-center transition"
+                :title="sidebarAberto ? 'Importar CSV' : ''">
+                <span class="flex items-center justify-center gap-2" x-show="sidebarAberto">
+                    <i class="fa-solid fa-file-import"></i>
+                    <span>Importar CSV</span>
+                </span>
+                <span x-show="!sidebarAberto"><i class="fa-solid fa-file-import"></i></span>
+            </button>
+        </div>
+
+        <!-- Lista de Leads no Backlog -->
+        <div x-show="sidebarAberto" class="p-3 space-y-2">
+            {% for registro in backlog %}
+            <div class="bg-gray-50 border border-gray-200 rounded-md p-2 hover:shadow-sm transition cursor-pointer"
+           @click="moverParaKanban('{{ registro.id }}')"
+           @dblclick="window.location.href='{% url 'registrar_contato' registro.id %}'">
+                <div class="flex justify-between items-start mb-1">
+                    <h3 class="font-semibold text-gray-800 text-sm leading-tight">{{ registro.nome_empresa }}</h3>
+                    <span class="text-[11px] px-2 py-0.5 rounded bg-gray-200 text-gray-700">
+                        {{ registro.get_origem_display }}
+                    </span>
+                </div>
+                <div class="text-[11px] text-gray-600 space-y-0.5">
+                    <div><i class="fa-solid fa-location-dot mr-1 text-gray-500"></i>{{ registro.cidade }}/{{ registro.uf }}</div>
+                    <div><i class="fa-solid fa-phone mr-1 text-gray-500"></i>{{ registro.telefone }}</div>
+                    <div class="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 font-semibold">
+                        <i class="fa-solid fa-headset"></i>
+                        <span>{{ registro.get_canal_contato_display }}</span>
+                    </div>
+                    {% if registro.ultimo_contato %}
+                    <div class="text-blue-600 flex items-center gap-1">
+                        <i class="fa-regular fa-clock"></i>
+                        <span>Último: {{ registro.ultimo_contato|date:"d/m/Y H:i" }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+                <button @click="moverParaKanban('{{ registro.id }}')"
+                   class="btn-primary w-full btn-sm">→ Mover para Kanban
+                </button>
+            </div>
+            {% empty %}
+            <p class="text-gray-500 text-center py-8">Nenhum lead na base</p>
+            {% endfor %}
+            
+            <!-- Botão "Carregar Mais" -->
+            {% if backlog_count > 10 %}
+            <button 
+                @click="carregarMaisRegistros('backlog', 2)"
+                class="w-full py-2 text-xs font-semibold text-gray-600 border border-gray-300 rounded hover:bg-gray-100 transition">
+                ↓ Carregar Mais ({{ backlog_count|add:"-10" }} restantes)
+            </button>
+            {% endif %}
+        </div>
+    </aside>
+
+    <!-- KANBAN PRINCIPAL -->
+    <main class="flex-1 overflow-x-auto bg-gray-50 p-4 space-y-4">
+        {% if flash_success %}
+        <div class="bg-green-100 border border-green-200 text-green-800 px-3 py-2 rounded text-sm">
+            {{ flash_success }}
+        </div>
+        {% endif %}
+        {% if flash_error %}
+        <div class="bg-red-100 border border-red-200 text-red-800 px-3 py-2 rounded text-sm">
+            {{ flash_error }}
+        </div>
+        {% endif %}
+
+        <div class="overflow-x-auto">
+            <!-- PAINEL DE DESEMPENHO - Alinhado com colunas do Kanban -->
+            <div class="mb-4" x-data="{ periodo: 'dia' }">
+                <!-- Legenda + Filtros na mesma linha, alinhados ao fim dos cards -->
+                <div class="mb-2 flex items-center justify-between" :style="`width: ${(getCardWidth()*4)+36}px;`">
+                    <p class="text-xs text-gray-500">📊 Métricas de desempenho (visão analítica) — abaixo é execução diária no Kanban</p>
+                    <div class="inline-flex rounded-lg border border-gray-300 bg-white p-1">
+                        <button @click="periodo = 'dia'; document.getElementById('filtro-periodo').value = 'dia'; carregarDesempenho()" 
+                                :class="periodo === 'dia' ? 'text-white' : 'text-gray-700 hover:bg-gray-100'"
+                                :style="periodo === 'dia' ? 'background-color: var(--primary)' : ''"
+                                class="px-3 py-1 text-sm font-medium rounded-md transition">
+                            Dia
+                        </button>
+                        <button @click="periodo = 'semana'; document.getElementById('filtro-periodo').value = 'semana'; carregarDesempenho()" 
+                                :class="periodo === 'semana' ? 'text-white' : 'text-gray-700 hover:bg-gray-100'"
+                                :style="periodo === 'semana' ? 'background-color: var(--primary)' : ''"
+                                class="px-3 py-1 text-sm font-medium rounded-md transition">
+                            Semana
+                        </button>
+                        <button @click="periodo = 'mes'; document.getElementById('filtro-periodo').value = 'mes'; carregarDesempenho()" 
+                                :class="periodo === 'mes' ? 'text-white' : 'text-gray-700 hover:bg-gray-100'"
+                                :style="periodo === 'mes' ? 'background-color: var(--primary)' : ''"
+                                class="px-3 py-1 text-sm font-medium rounded-md transition">
+                            Mês
+                        </button>
+                    </div>
+                    <input type="hidden" id="filtro-periodo" value="dia">
+                </div>
+                
+                <div class="flex gap-3 min-w-max">
+                    <div class="card p-3 bg-gradient-to-br from-gray-50 to-gray-100" 
+                         :style="`width: ${getCardWidth()}px; min-width: ${getCardWidth()}px; max-width: ${getCardWidth()}px; flex-shrink: 0;`">
+                        <div class="text-xs text-gray-600 font-medium mb-1">Conta para Contato</div>
+                        <div class="text-2xl font-bold text-gray-800" id="metricas-conta-contato">-</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5">base ativa</div>
+                    </div>
+                    
+                    <div class="card p-3 bg-gradient-to-br from-cyan-50 to-cyan-100"
+                         :style="`width: ${getCardWidth()}px; min-width: ${getCardWidth()}px; max-width: ${getCardWidth()}px; flex-shrink: 0;`">
+                        <div class="text-xs text-gray-600 font-medium mb-1">Contato Feito</div>
+                        <div class="text-2xl font-bold text-blue-600" id="metricas-contatos">-</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5" id="taxa-contato-label">0%</div>
+                    </div>
+                    
+                    <div class="card p-3 bg-gradient-to-br from-yellow-50 to-yellow-100"
+                         :style="`width: ${getCardWidth()}px; min-width: ${getCardWidth()}px; max-width: ${getCardWidth()}px; flex-shrink: 0;`">
+                        <div class="text-xs text-gray-600 font-medium mb-1">Negociação / Cotação</div>
+                        <div class="text-2xl font-bold text-yellow-600" id="metricas-negociacoes">-</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5" id="taxa-negociacao-label">0%</div>
+                    </div>
+                    
+                    <div class="card p-3 bg-gradient-to-br from-green-50 to-green-100"
+                         :style="`width: ${getCardWidth()}px; min-width: ${getCardWidth()}px; max-width: ${getCardWidth()}px; flex-shrink: 0;`">
+                        <div class="text-xs text-gray-600 font-medium mb-1">Pedido Realizado</div>
+                        <div class="text-2xl font-bold text-green-600" id="metricas-pedidos">-</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5" id="taxa-pedido-label">0%</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Divisor visual entre métricas e Kanban -->
+            <div class="mt-2 mb-2">
+                <hr class="border-gray-200 mb-2">
+            </div>
+            <div class="flex gap-3 min-w-max mb-4">
+                {% for status_key, status_label in kanban_status_choices %}
+            <div class="card flex flex-col"
+                 :style="`width: ${getCardWidth()}px; min-width: ${getCardWidth()}px; max-width: ${getCardWidth()}px; flex-shrink: 0;`">
+                <!-- Header da Coluna -->
+                <div class="p-3 border-b {% if status_key == 'conta_para_contato' %}bg-gray-100{% elif status_key == 'contato_feito' %}bg-cyan-100{% elif status_key == 'negociacao_cotacao' %}bg-yellow-100{% elif status_key == 'pedido_realizado' %}bg-green-100{% elif status_key == 'conta_ativa' %}bg-indigo-100{% else %}bg-red-100{% endif %}">
+                    <h3 class="font-semibold text-gray-800 text-sm">{{ status_label }}</h3>
+                    <p class="text-xs text-gray-600 mt-1">
+                        {{ kanban_counts|get_item:status_key|default:0 }} card(s)
+                    </p>
+                </div>
+
+                <!-- Cards da Coluna -->
+                <div class="flex-1 p-3 space-y-2 overflow-y-auto" style="min-height: 400px; max-height: calc(100vh - 280px);" id="dropzone-{{ status_key }}"
+                     data-status="{{ status_key }}"
+                     data-registros="{{ status_key }}"
+                     @dragover.prevent="$el.classList.add('bg-blue-50')"
+                     @dragleave="$el.classList.remove('bg-blue-50')"
+                     @drop.prevent="dropCard($event, '{{ status_key }}')">
+                    {% for registro in kanban_by_status|get_item:status_key %}
+                    <!-- CARD KANBAN REFATORADO -->
+                    <div class="bg-white border border-gray-200 rounded-md p-2 hover:shadow-md transition cursor-move text-sm h-fit group" 
+                         id="card-{{ registro.id }}" 
+                         draggable="true" 
+                         data-id="{{ registro.id }}"
+                         @dragstart="dragStart($event, '{{ registro.id }}')" 
+                         @dragend="dragEnd($event)" 
+                         @dblclick="window.location.href='{% url 'registrar_contato' registro.id %}'">
+                        
+                        <!-- HEADER: Nome + Origem Badge + Menu -->
+                        <div class="flex justify-between items-start gap-2 mb-1.5">
+                            <div class="flex-1 min-w-0">
+                                <h4 class="font-semibold text-gray-800 text-xs leading-tight truncate" title="{{ registro.nome_empresa }}">
+                                    {{ registro.nome_empresa }}
+                                </h4>
+                                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium mt-1">
+                                    {{ registro.get_origem_display }}
+                                </span>
+                            </div>
+                            
+                            <!-- Menu Context (⋮) -->
+                            <div class="relative opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button @click="toggleCardMenu('{{ registro.id }}')"
+                                        class="p-1 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800"
+                                        title="Mais opções">
+                                    <i class="fa-solid fa-ellipsis-v text-xs"></i>
+                                </button>
+                                <div x-show="cardMenuOpen === '{{ registro.id }}'" 
+                                     @click.outside="cardMenuOpen = null"
+                                     class="absolute right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 min-w-max text-xs">
+                                    <button @click="moverParaBacklog('{{ registro.id }}'); cardMenuOpen = null"
+                                            class="block w-full text-left px-3 py-1.5 hover:bg-gray-100 text-gray-700">
+                                        <i class="fa-solid fa-arrow-left mr-2 text-gray-500"></i>Retornar
+                                    </button>
+                                    <button @click="arquivar('{{ registro.id }}'); cardMenuOpen = null"
+                                            class="block w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-700 border-t border-gray-200">
+                                        <i class="fa-solid fa-trash mr-2 text-red-500"></i>Arquivar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- CONTEÚDO PRINCIPAL -->
+                        <div class="space-y-1 mb-2">
+                            <!-- Telefone: Clicável com Ícone WhatsApp -->
+                            <a href="https://wa.me/{{ registro.telefone|slugify }}" 
+                               target="_blank"
+                               rel="noopener"
+                               class="inline-flex items-center gap-1.5 text-xs text-gray-700 hover:text-green-600 hover:underline transition"
+                               title="Enviar mensagem WhatsApp">
+                                <i class="fa-brands fa-whatsapp text-green-500 text-sm"></i>
+                                <span>{{ registro.telefone }}</span>
+                            </a>
+                            
+                            <!-- Canal -->
+                            <div class="flex items-center gap-1 text-[10px] text-gray-600">
+                                <i class="fa-solid fa-phone text-gray-500" title="Canal: {{ registro.get_canal_contato_display }}"></i>
+                                <span title="Canal: {{ registro.get_canal_contato_display }}">{{ registro.get_canal_contato_display|truncatewords:1 }}</span>
+                            </div>
+                        </div>
+                        
+                        <!-- CONTEÚDO HOVER -->
+                        <div class="hidden group-hover:block text-[10px] text-gray-600 space-y-0.5 mb-2 pb-2 border-t border-gray-200 pt-1">
+                            <div><i class="fa-solid fa-location-dot mr-1 text-gray-400 text-[9px]"></i><span title="{{ registro.cidade }}/{{ registro.uf }}">{{ registro.cidade }}/{{ registro.uf }}</span></div>
+                            <div><i class="fa-solid fa-user mr-1 text-gray-400 text-[9px]"></i><span title="{{ registro.vendedor.get_full_name|default:registro.vendedor.username }}">{{ registro.vendedor.get_full_name|default:registro.vendedor.username|truncatewords:2 }}</span></div>
+                        </div>
+                        
+                        <!-- BOTÃO PRINCIPAL -->
+                        <a href="{% url 'registrar_contato' registro.id %}" 
+                           class="block w-full bg-green-500 hover:bg-green-600 text-white text-xs py-1.5 px-2 rounded font-semibold text-center transition">
+                            <span class="inline-flex items-center justify-center gap-1"><i class="fa-solid fa-arrow-right text-[10px]"></i>Avançar</span>
+                        </a>
+                    </div>
+                    {% endfor %}
+                    
+                    <!-- Botão "Carregar Mais" por Status -->
+                    {% if kanban_counts|get_item:status_key > 8 %}
+                    <button 
+                        @click="carregarMaisRegistros('{{ status_key }}', 2)"
+                        class="w-full py-2 text-xs font-semibold text-gray-600 border border-gray-300 rounded hover:bg-gray-100 transition"
+                        data-load-more="{{ status_key }}">
+                        ↓ Carregar Mais ({{ kanban_counts|get_item:status_key|add:"-8" }} restantes)
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+            </div>
+        </div>
+
+        <!-- Modal Importar CSV - DENTRO DO X-DATA -->
+        <div id="importarCsvModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" x-show="mostrarModalCSV" x-transition x-cloak @click="if($event.target.id === 'importarCsvModal') mostrarModalCSV = false">
+            <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" @click.stop>
+                <div class="p-6 border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <i class="fa-solid fa-file-import text-blue-600"></i>
+                                <span>Importar Leads (CSV)</span>
+                            </h3>
+                            <p class="text-sm text-gray-600 mt-1">Carregue um arquivo CSV com dados de leads</p>
+                        </div>
+                        <button @click="mostrarModalCSV = false" class="text-gray-500 hover:text-gray-700 text-2xl">×</button>
+                    </div>
+                </div>
+                
+                <form action="{% url 'importar_csv' %}" method="post" enctype="multipart/form-data" class="p-6 space-y-4" @submit="mostrarModalCSV = false">
+                    {% csrf_token %}
+                    
+                    <div>
+                        <label for="csv-file" class="block text-sm font-medium text-gray-700 mb-2">
+                            Selecionar arquivo CSV *
+                        </label>
+                        <input 
+                            type="file" 
+                            name="csv_file" 
+                            id="csv-file"
+                            accept=".csv"
+                            required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        <p class="text-xs text-gray-500 mt-1">Formato esperado: nome_empresa, telefone, cidade, uf, origem, canal_contato</p>
+                    </div>
+                    
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <p class="text-xs text-blue-800">
+                            <strong>Formato esperado:</strong><br>
+                            <code class="bg-white px-1 py-0.5 rounded text-blue-600">nome_empresa,telefone,cidade,uf,origem,canal_contato</code>
+                        </p>
+                    </div>
+                    
+                    <div class="flex gap-3 pt-4">
+                        <button 
+                            type="submit"
+                            style="background-color: #018aa7;"
+                            class="flex-1 hover:opacity-90 text-white font-medium py-2 px-4 rounded-lg transition">
+                            <span class="inline-flex items-center gap-2 justify-center">
+                                <i class="fa-solid fa-upload"></i>
+                                <span>Importar</span>
+                            </span>
+                        </button>
+                        <button 
+                            type="button"
+                            @click="mostrarModalCSV = false"
+                            class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium py-2 px-4 rounded-lg transition">
+                            Cancelar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+function kanbanApp() {
+    return {
+        sidebarAberto: true,
+        draggedId: null,
+        mostrarModalCSV: false,
+        cardMenuOpen: null, // Menu context do card
+        
+        // Calcular largura dinâmica dos cards
+        getCardWidth() {
+            const width = window.innerWidth;
+            if (width < 1024) return 240;     // Muito pequeno
+            if (width < 1440) return 280;     // Tablet/Notebook 13-14"
+            return 320;                       // Desktop 1440+
+        },
+        
+        // Toggle menu context do card
+        toggleCardMenu(registroId) {
+            this.cardMenuOpen = this.cardMenuOpen === registroId ? null : registroId;
+        },
+        
+        dragStart(event, id) {
+            this.draggedId = id;
+            event.target.classList.add('opacity-50');
+            event.dataTransfer.setData('text/plain', id);
+        },
+        
+        dragEnd(event) {
+            event.target.classList.remove('opacity-50');
+        },
+        
+        async dropCard(event, novoStatus) {
+            const coluna = event.currentTarget;
+            coluna.classList.remove('bg-blue-50');
+            
+            const registroId = event.dataTransfer.getData('text/plain');
+            
+            const formData = new FormData();
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+            formData.append('novo_status', novoStatus);
+            
+            try {
+                const response = await fetch(`/crm/atualizar-status/${registroId}/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao retomar');
+                }
+            } catch (error) {
+                console.error('Erro ao atualizar status:', error);
+                alert('Erro ao atualizar status');
+            }
+        },
+        
+        async moverParaKanban(registroId) {
+            const formData = new FormData();
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+            
+            try {
+                const response = await fetch(`/crm/mover-kanban/${registroId}/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Erro ao mover para kanban');
+                }
+            } catch (error) {
+                console.error('Erro ao mover para kanban:', error);
+                alert('Erro ao mover para kanban');
+            }
+        },
+        
+        async moverParaBacklog(registroId) {
+            const formData = new FormData();
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+            
+            try {
+                const response = await fetch(`/crm/mover-backlog/${registroId}/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Erro ao mover para backlog');
+                }
+            } catch (error) {
+                console.error('Erro ao retomar:', error);
+                alert('Erro ao retomar');
+            }
+        },
+
+        async arquivar(registroId) {
+            const formData = new FormData();
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+            formData.append('novo_status', 'arquivada');
+
+            try {
+                const response = await fetch(`/crm/atualizar-status/${registroId}/`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao arquivar');
+                }
+            } catch (error) {
+                console.error('Erro ao arquivar:', error);
+                alert('Erro ao arquivar');
+            }
+        },
+
+        async carregarMaisRegistros(local, pagina) {
+            try {
+                const response = await fetch(`/crm/api/carregar-mais-registros/?local=${local}&page=${pagina}`);
+                const data = await response.json();
+                
+                if (data.html) {
+                    // Inserir cards no container apropriado
+                    const container = document.querySelector(`[data-registros="${local}"]`);
+                    if (container) {
+                        container.insertAdjacentHTML('beforeend', data.html);
+                    }
+                    
+                    // Atualizar ou remover botão "Carregar Mais"
+                    if (!data.tem_mais) {
+                        const btn = document.querySelector(`[data-load-more="${local}"]`);
+                        if (btn) btn.remove();
+                    }
+                }
+            } catch (error) {
+                console.error('Erro ao carregar mais registros:', error);
+                alert('Erro ao carregar mais registros');
+            }
+        }
+    }
+}
+
+// Carregar desempenho do usuário ao iniciar
+function carregarDesempenho() {
+    const userId = {{ request.user.id }};
+    const periodoInput = document.getElementById('filtro-periodo');
+    const periodo = periodoInput ? periodoInput.value : 'dia';
+    
+    if (!userId) {
+        console.warn('Usuário não identificado');
+        return;
+    }
+    
+    console.log(`[KANBAN] Carregando desempenho: userId=${userId}, período=${periodo}`);
+    
+    const payload = { periodo: periodo };
+    console.log(`[KANBAN] Enviando payload:`, payload);
+    
+    fetch(`/crm/api/desempenho-vendedor/${userId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    })
+    .then(response => {
+        console.log(`[KANBAN] Resposta HTTP: ${response.status}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log(`[KANBAN] Dados recebidos:`, data);
+        
+        const metricasMap = {
+            'metricas-conta-contato': data.conta_para_contato,
+            'metricas-contatos': data.contatos_realizados,
+            'metricas-negociacoes': data.negociacoes,
+            'metricas-pedidos': data.pedidos,
+            'taxa-contato-label': `${data.taxa_contato}%`,
+            'taxa-negociacao-label': `${data.taxa_negociacao}%`,
+            'taxa-pedido-label': `${data.taxa_pedido}%`,
+        };
+        
+        let updateCount = 0;
+        Object.entries(metricasMap).forEach(([elementId, value]) => {
+            const element = document.getElementById(elementId);
+            if (element) {
+                console.log(`[KANBAN] Atualizando ${elementId} = ${value}`);
+                element.textContent = value;
+                updateCount++;
+            } else {
+                console.warn(`[KANBAN] Elemento NÃO encontrado: ${elementId}`);
+            }
+        });
+        
+        console.log(`[KANBAN] Total de elementos atualizados: ${updateCount}`);
+    })
+    .catch(error => {
+        console.error('[KANBAN] Erro ao carregar desempenho:', error);
+        alert(`Erro ao carregar desempenho: ${error.message}`);
+    });
+}
+
+// Aguardar carregamento do DOM antes de chamar a função
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('[KANBAN] DOM carregado, iniciando carregarDesempenho');
+        carregarDesempenho();
+    });
+} else {
+    // DOM já está carregado
+    console.log('[KANBAN] DOM já estava carregado, iniciando carregarDesempenho');
+    carregarDesempenho();
+}
+
+// Recarregar desempenho a cada 5 segundos para validação em tempo real
+setInterval(carregarDesempenho, 5000);
+</script>
+{% endblock %}

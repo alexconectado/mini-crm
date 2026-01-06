@@ -1,0 +1,106 @@
+{% extends 'crm/base.html' %}
+
+{% block title %}Contas Ativas - Mini-CRM{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto p-8">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <i class="fa-solid fa-rotate text-indigo-700"></i>
+                <span>Contas Ativas (Recorrência)</span>
+            </h1>
+            <p class="text-sm text-gray-600 mt-1">{{ paginator.count }} conta(s) ativa(s) - Página {{ page_obj.number }} de {{ paginator.num_pages }}</p>
+        </div>
+        <a href="{% url 'kanban' %}" class="btn-primary">
+            <span class="inline-flex items-center gap-2"><i class="fa-solid fa-arrow-left"></i><span>Voltar ao Kanban</span></span>
+        </a>
+    </div>
+
+    {% if contas %}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for registro in contas %}
+        <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <div class="flex items-start justify-between mb-2">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800">{{ registro.nome_empresa }}</h2>
+                    <p class="text-sm text-gray-600 flex items-center gap-1"><i class="fa-solid fa-location-dot text-gray-500"></i>{{ registro.cidade }}/{{ registro.uf }}</p>
+                    <p class="text-sm text-gray-600 flex items-center gap-1"><i class="fa-solid fa-phone text-gray-500"></i>{{ registro.telefone }}</p>
+                    <p class="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs font-semibold mt-1">
+                        <i class="fa-solid fa-headset"></i>{{ registro.get_canal_contato_display }}
+                    </p>
+                </div>
+                <div class="text-right text-xs text-gray-600">
+                    <div class="px-2 py-1 rounded bg-indigo-50 text-indigo-700 font-semibold">Conta Ativa</div>
+                    {% if registro.ultimo_contato %}
+                    <div class="mt-1 flex items-center gap-1 text-indigo-700"><i class="fa-regular fa-clock"></i><span>{{ registro.ultimo_contato|date:"d/m/Y H:i" }}</span></div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if registro.resultado_ultimo_contato %}
+            <div class="text-sm text-gray-700 bg-gray-50 rounded p-3 mb-3">
+                <p class="font-semibold text-gray-800 mb-1">Último resultado</p>
+                <p class="text-gray-700">{{ registro.resultado_ultimo_contato }}</p>
+            </div>
+            {% endif %}
+
+            <div class="flex gap-2">
+                <a href="{% url 'registrar_contato' registro.id %}" class="flex-1 btn-primary text-center">
+                    <span class="inline-flex items-center gap-2 justify-center"><i class="fa-solid fa-arrows-rotate"></i><span>Rodar novo ciclo</span></span>
+                </a>
+                <a href="tel:{{ registro.telefone }}" class="btn-secondary">
+                    <i class="fa-solid fa-phone"></i>
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- Paginação -->
+    {% if paginator.num_pages > 1 %}
+    <div class="flex justify-center items-center gap-2 mt-8">
+        {% if page_obj.has_previous %}
+        <a href="?page=1" class="btn-secondary" title="Primeira página">
+            <i class="fa-solid fa-angles-left"></i>
+        </a>
+        <a href="?page={{ page_obj.previous_page_number }}" class="btn-secondary" title="Página anterior">
+            <i class="fa-solid fa-angle-left"></i>
+        </a>
+        {% else %}
+        <button disabled class="btn-secondary opacity-50 cursor-not-allowed">
+            <i class="fa-solid fa-angles-left"></i>
+        </button>
+        <button disabled class="btn-secondary opacity-50 cursor-not-allowed">
+            <i class="fa-solid fa-angle-left"></i>
+        </button>
+        {% endif %}
+        
+        <span class="px-4 py-2 text-sm font-medium text-gray-700">
+            Página {{ page_obj.number }} de {{ paginator.num_pages }}
+        </span>
+        
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}" class="btn-secondary" title="Próxima página">
+            <i class="fa-solid fa-angle-right"></i>
+        </a>
+        <a href="?page={{ paginator.num_pages }}" class="btn-secondary" title="Última página">
+            <i class="fa-solid fa-angles-right"></i>
+        </a>
+        {% else %}
+        <button disabled class="btn-secondary opacity-50 cursor-not-allowed">
+            <i class="fa-solid fa-angle-right"></i>
+        </button>
+        <button disabled class="btn-secondary opacity-50 cursor-not-allowed">
+            <i class="fa-solid fa-angles-right"></i>
+        </button>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="bg-white border border-gray-200 rounded-lg p-6 text-center text-gray-500">
+        Nenhuma conta ativa no momento.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

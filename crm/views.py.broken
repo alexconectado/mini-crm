@@ -1,0 +1,1183 @@
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.http import JsonResponse, HttpResponse
+from django.views.decorators.http import require_POST
+from django.views.decorators.cache import cache_page
+from django.db.models import Count, Q
+from django.utils import timezone
+from django.template.loader import render_to_string
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.core.cache import cache
+from .models import (
+    RegistroComercial,
+    ContatoHistorico,
+    StatusPipelineChoices,
+    OrigemChoices,
+    CanalContatoChoices,
+)
+from .decorators import comercial_required, admin_required
+import csv
+import json
+
+
+# Ordem e configuração oficial do pipeline
+PIPELINE_SEQUENCE = [
+    (StatusPipelineChoices.CONTA_PARA_CONTATO, StatusPipelineChoices.CONTA_PARA_CONTATO.label),
+    (StatusPipelineChoices.CONTATO_FEITO, StatusPipelineChoices.CONTATO_FEITO.label),
+    (StatusPipelineChoices.NEGOCIACAO_COTACAO, StatusPipelineChoices.NEGOCIACAO_COTACAO.label),
+    (StatusPipelineChoices.PEDIDO_REALIZADO, StatusPipelineChoices.PEDIDO_REALIZADO.label),
+    (StatusPipelineChoices.CONTA_ATIVA, StatusPipelineChoices.CONTA_ATIVA.label),
+    (StatusPipelineChoices.ARQUIVADA, StatusPipelineChoices.ARQUIVADA.label),
+]
+
+# Kanban exibe apenas estágios operacionais (exclui Arquivada e Conta Ativa)
+KANBAN_STATUSES = [
+    (StatusPipelineChoices.CONTA_PARA_CONTATO.value, StatusPipelineChoices.CONTA_PARA_CONTATO.label),
+    (StatusPipelineChoices.CONTATO_FEITO.value, StatusPipelineChoices.CONTATO_FEITO.label),
+    (StatusPipelineChoices.NEGOCIACAO_COTACAO.value, StatusPipelineChoices.NEGOCIACAO_COTACAO.label),
+    (StatusPipelineChoices.PEDIDO_REALIZADO.value, StatusPipelineChoices.PEDIDO_REALIZADO.label),
+]
+
+STAGE_CONFIG = {
+    StatusPipelineChoices.CONTA_PARA_CONTATO.value: {
+        'checklist': [
+            'Tentativa de contato realizada',
+            'Canal validado (Telefone / WhatsApp)',
+            'Decisor identificado',
+        ],
+        'next_steps': [
+            'Tentar contato',
+            'Validar canal',
+            'Identificar decisor',
+        ],
+        'allowed_to': [
+            StatusPipelineChoices.CONTATO_FEITO.value,
+            StatusPipelineChoices.ARQUIVADA.value,
+        ],
+        'require_contact': True,
+        'require_next_step': True,
+        'require_checklist': False,
+    },
+    StatusPipelineChoices.CONTATO_FEITO.value: {
+        'checklist': [
+            'Lista de preços enviada',
+            'Cotação solicitada',
+            'Retorno agendado',
+            'Encaminhado para decisor',
+        ],
+        'next_steps': [
+            'Enviar lista de preços',
+            'Solicitar mix de produtos',
+            'Agendar retorno',
+            'Falar com decisor',
+        ],
+        'allowed_to': [
+            StatusPipelineChoices.NEGOCIACAO_COTACAO.value,
+            StatusPipelineChoices.CONTA_PARA_CONTATO.value,
+            StatusPipelineChoices.ARQUIVADA.value,
+        ],
+        'require_contact': True,
+        'require_next_step': True,
+        'require_checklist': True,
+    },
+    StatusPipelineChoices.NEGOCIACAO_COTACAO.value: {
+        'checklist': [
+            'Cotação enviada',
+            'Follow-up realizado',
+            'Ajuste de condição',
+            'Pedido confirmado',
+        ],
+        'next_steps': [
+            'Follow-up cotação',
+            'Ajustar condição',
+            'Confirmar pedido',
+        ],
+        'allowed_to': [
+            StatusPipelineChoices.PEDIDO_REALIZADO.value,
+            StatusPipelineChoices.CONTATO_FEITO.value,
+            StatusPipelineChoices.ARQUIVADA.value,
+        ],
+        'require_contact': True,
+        'require_next_step': True,
+        'require_checklist': True,
+    },
+    StatusPipelineChoices.PEDIDO_REALIZADO.value: {
+        'checklist': [
+            'Pedido registrado no ERP (Winthor)',
+            'Entrega confirmada',
+            'Pós-venda agendado',
+        ],
+        'next_steps': [
+            'Confirmar entrega',
+            'Realizar pós-venda',
+            'Programar recompra',
+        ],
+        'allowed_to': [
+            StatusPipelineChoices.CONTA_ATIVA.value,
+        ],
+        'require_contact': True,
+        'require_next_step': True,
+        'require_checklist': True,
+    },
+    StatusPipelineChoices.CONTA_ATIVA.value: {
+        'checklist': [
+            'Follow-up periódico',
+            'Reposição de estoque',
+            'Oferta de novos produtos',
+        ],
+        'next_steps': [
+            'Reposição',
+            'Upsell / cross-sell',
+            'Novo pedido',
+        ],
+        'allowed_to': [
+            StatusPipelineChoices.NEGOCIACAO_COTACAO.value,
+            StatusPipelineChoices.CONTA_PARA_CONTATO.value,
+            StatusPipelineChoices.ARQUIVADA.value,
+        ],
+        'require_contact': True,
+        'require_next_step': True,
+        'require_checklist': False,
+    },
+    StatusPipelineChoices.ARQUIVADA.value: {
+        'checklist': [],
+        'next_steps': [],
+        'allowed_to': [
+            StatusPipelineChoices.CONTA_PARA_CONTATO.value,
+        ],
+        'require_contact': False,
+        'require_next_step': False,
+        'require_checklist': False,
+    },
+}
+
+
+def allowed_transitions(status_key: str):
+    return STAGE_CONFIG.get(status_key, {}).get('allowed_to', [])
+
+
+@comercial_required
+def kanban_view(request):
+    """View principal do Kanban."""
+    user = request.user
+    
+    # Filtrar registros por vendedor (a menos que seja gestor)
+    vendedor_filter = request.GET.get('vendedor')
+    if user.is_superuser:
+        if vendedor_filter and vendedor_filter != 'todos':
+            all_registros = RegistroComercial.objects.filter(vendedor_id=vendedor_filter)
+        else:
+            all_registros = RegistroComercial.objects.all()
+    else:
+        all_registros = RegistroComercial.objects.filter(vendedor=user)
+        vendedor_filter = None  # Vendedores não têm acesso ao filtro
+    
+    # Backlog: apenas primeiros 10 registros (paginado depois)
+    backlog = all_registros.filter(no_kanban=False).order_by('-criado_em')[:10]
+    backlog_count = all_registros.filter(no_kanban=False).count()
+    
+    # Kanban: registros ativos (exclui Arquivado e Conta Ativa) - primeiros 8 por status
+    kanban_all = all_registros.filter(no_kanban=True).exclude(
+        status_pipeline__in=[
+            StatusPipelineChoices.ARQUIVADA.value,
+            StatusPipelineChoices.CONTA_ATIVA.value,
+        ]
+    ).order_by('status_pipeline', '-atualizado_em')
+    
+    # Paginação por status: 8 itens por status inicial
+    kanban_by_status = {}
+    kanban_counts = {}
+    for status_key, _ in KANBAN_STATUSES:
+        registros_status = all_registros.filter(
+            no_kanban=True,
+            status_pipeline=status_key
+        ).order_by('-atualizado_em')
+        kanban_counts[status_key] = registros_status.count()
+        kanban_by_status[status_key] = registros_status[:8]
+    
+    flash_success = request.session.pop('flash_success', None)
+    flash_error = request.session.pop('flash_error', None)
+
+    # Vendedores disponíveis para filtro (apenas admin)
+    from django.contrib.auth.models import User
+    vendedores = User.objects.filter(groups__name='Comercial').order_by('first_name', 'username') if user.is_superuser else []
+
+    context = {
+        'backlog': backlog,
+        'backlog_count': backlog_count,
+        'kanban_by_status': kanban_by_status,
+        'kanban_counts': kanban_counts,
+        'kanban_status_choices': KANBAN_STATUSES,
+        'origem_choices': OrigemChoices.choices,
+        'canal_choices': CanalContatoChoices.choices,
+        'flash_success': flash_success,
+        'flash_error': flash_error,
+        'vendedores': vendedores,
+        'vendedor_filter': vendedor_filter,
+    }
+    
+    return render(request, 'crm/kanban.html', context)
+
+@login_required
+            'checklist': [],
+    if not request.user.is_superuser and registro.vendedor != request.user:
+        return JsonResponse({'error': 'Sem permissão'}, status=403)
+
+    # Regras fechadas por estágio: resultados possíveis e decisão de próximo estágio
+    PIPELINE_RULES = {
+        StatusPipelineChoices.CONTA_PARA_CONTATO.value: {
+            'results': [
+                ('falou_com_decisor', 'Falou com decisor'),
+                ('falou_com_porteiro', 'Falou com porteiro'),
+                ('nao_atendeu', 'Não atendeu'),
+                ('retornar_depois', 'Retornar depois'),
+                ('numero_invalido', 'Número inválido'),
+            ],
+            'advance_map': {
+                'falou_com_decisor': StatusPipelineChoices.CONTATO_FEITO.value,
+                'falou_com_porteiro': StatusPipelineChoices.CONTATO_FEITO.value,
+                'nao_atendeu': 'stay',
+                'retornar_depois': 'stay',
+                'numero_invalido': 'archive',
+            },
+        },
+        StatusPipelineChoices.CONTATO_FEITO.value: {
+            'results': [
+                ('interessado', 'Interessado'),
+                ('avaliando', 'Avaliando'),
+                ('sem_interesse', 'Sem interesse'),
+                ('sem_perfil', 'Sem perfil'),
+            ],
+            'advance_map': {
+                'interessado': StatusPipelineChoices.NEGOCIACAO_COTACAO.value,
+                'avaliando': 'stay',
+                'sem_interesse': 'archive',
+                'sem_perfil': 'archive',
+            },
+        },
+        StatusPipelineChoices.NEGOCIACAO_COTACAO.value: {
+            'results': [
+                ('em_negociacao', 'Em negociação'),
+                ('aguardando_resposta', 'Aguardando resposta'),
+                ('recusou', 'Recusou'),
+            ],
+            'advance_map': {
+                'em_negociacao': 'stay',
+                'aguardando_resposta': 'stay',
+                'recusou': 'archive',
+                # Aceitou é implícito quando checklist completo (tratado na função de resolução)
+            },
+        },
+        StatusPipelineChoices.PEDIDO_REALIZADO.value: {
+            'results': [
+                ('pedido_confirmado', 'Pedido confirmado'),
+            ],
+            'advance_map': {
+                'pedido_confirmado': StatusPipelineChoices.CONTA_ATIVA.value,  # Só com checklist completo
+            },
+        },
+    }
+
+
+    def checklist_completo(status, checklist_itens):
+        expected = STAGE_CONFIG.get(status, {}).get('checklist', [])
+        if not expected:
+            return True
+        return set(expected).issubset(set(checklist_itens))
+
+
+    def resolve_next_stage(current_status, resultado_code, checklist_itens):
+        """Resolve próximo estágio com base nas regras fechadas.
+
+        Retorna dict com:
+          - next_status: valor do próximo status (ou o atual se permanecer)
+          - archive: bool indicando arquivamento
+          - error: mensagem caso checklist seja obrigatório para avançar e esteja incompleto
+        """
+        rules = PIPELINE_RULES.get(current_status)
+        if not rules:
+            return {'next_status': current_status, 'archive': False}
+
+        advance_map = rules.get('advance_map', {})
+        decision = advance_map.get(resultado_code)
+
+        # Regra implícita: em Negociação, checklist completo implica avanço para Pedido Realizado
+        if current_status == StatusPipelineChoices.NEGOCIACAO_COTACAO.value and checklist_completo(current_status, checklist_itens):
+            return {'next_status': StatusPipelineChoices.PEDIDO_REALIZADO.value, 'archive': False}
+
+        if decision == 'archive':
+            return {'next_status': StatusPipelineChoices.ARQUIVADA.value, 'archive': True}
+        if decision == 'stay' or decision is None:
+            return {'next_status': current_status, 'archive': False}
+
+        # Para avançar, checklist deve estar completo
+        if not checklist_completo(current_status, checklist_itens):
+            return {'next_status': current_status, 'archive': False, 'error': 'Checklist completo obrigatório para avançar.'}
+
+        return {'next_status': decision, 'archive': False}
+    
+    registro.mover_para_backlog()
+    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'success': True})
+    return redirect('kanban')
+
+
+@login_required
+@require_POST
+def atualizar_status(request, registro_id):
+    """Atualiza o status de um registro via drag & drop."""
+    registro = get_object_or_404(RegistroComercial, id=registro_id)
+    
+    # Verificar permissão
+    if not request.user.is_superuser and registro.vendedor != request.user:
+        return JsonResponse({'error': 'Sem permissão'}, status=403)
+    
+    novo_status = request.POST.get('novo_status')
+
+    if novo_status not in dict(StatusPipelineChoices.choices):
+        return JsonResponse({'error': 'Status inválido'}, status=400)
+
+    if novo_status == registro.status_pipeline:
+        return JsonResponse({'error': 'O registro já está neste estágio.'}, status=400)
+
+    if novo_status not in allowed_transitions(registro.status_pipeline):
+        return JsonResponse({'error': 'Transição não permitida. Use "Registrar Contato" para avançar ou retornar.'}, status=400)
+
+    # Regra global: mudar estágio exige um contato registrado no fluxo oficial
+    return JsonResponse({'error': 'Registro de contato obrigatório para mudar estágio. Use "Registrar Contato".'}, status=400)
+
+
+@login_required
+def registrar_contato(request, registro_id):
+    """Registra um novo contato."""
+    registro = get_object_or_404(RegistroComercial, id=registro_id)
+    
+    # Verificar permissão
+    if not request.user.is_superuser and registro.vendedor != request.user:
+        return redirect('kanban')
+    
+    # Dados enviados ao front: checklist e resultados por estágio
+    stage_config_front = {}
+    for key, cfg in STAGE_CONFIG.items():
+        stage_config_front[key] = {
+            'checklist': cfg.get('checklist', []),
+            'results': PIPELINE_RULES.get(key, {}).get('results', []),
+        }
+
+    if request.method == 'POST':
+        resultado_code = request.POST.get('resultado', '').strip()
+        checklist_itens = request.POST.getlist('checklist')
+        canal_contato = request.POST.get('canal_contato', registro.canal_contato)
+
+        if canal_contato not in dict(CanalContatoChoices.choices):
+            return render(request, 'crm/registrar_contato.html', {
+                'registro': registro,
+                'error': 'Canal de contato inválido.',
+                'canal_choices': CanalContatoChoices.choices,
+                'stage_config_json': json.dumps(stage_config_front),
+            })
+        # Resultado obrigatório e válido (ENUM por estágio)
+        if not resultado_code:
+            return render(request, 'crm/registrar_contato.html', {
+                'registro': registro,
+                'error': 'O campo resultado é obrigatório.',
+                'canal_choices': CanalContatoChoices.choices,
+                'stage_config_json': json.dumps(stage_config_front),
+            })
+
+        valid_results = dict(PIPELINE_RULES.get(registro.status_pipeline, {}).get('results', []))
+        if resultado_code not in valid_results.keys():
+            return render(request, 'crm/registrar_contato.html', {
+                'registro': registro,
+                'error': 'Resultado inválido para o estágio atual.',
+                'canal_choices': CanalContatoChoices.choices,
+                'stage_config_json': json.dumps(stage_config_front),
+            })
+
+        # Valida checklist: somente itens do estágio atual
+        stage_cfg_current = STAGE_CONFIG.get(registro.status_pipeline, {})
+
+        if len(stage_cfg_current.get('checklist', [])) > 0 and len(checklist_itens) == 0:
+            return render(request, 'crm/registrar_contato.html', {
+                'registro': registro,
+                'error': 'Marque ao menos um item do checklist.',
+                'canal_choices': CanalContatoChoices.choices,
+                'stage_config_json': json.dumps(stage_config_front),
+            })
+
+        if any(item not in stage_cfg_current.get('checklist', []) for item in checklist_itens):
+            return render(request, 'crm/registrar_contato.html', {
+                'registro': registro,
+                'error': 'Checklist inválido para este estágio.',
+                'canal_choices': CanalContatoChoices.choices,
+                'stage_config_json': json.dumps(stage_config_front),
+            })
+        # Resolver próximo estágio automaticamente
+        decision = resolve_next_stage(registro.status_pipeline, resultado_code, checklist_itens)
+        if decision.get('error'):
+            return render(request, 'crm/registrar_contato.html', {
+                'registro': registro,
+                'error': decision['error'],
+                'canal_choices': CanalContatoChoices.choices,
+                'stage_config_json': json.dumps(stage_config_front),
+            })
+
+        status_anterior = registro.status_pipeline
+
+        # Persistência
+        resultado_label = dict(PIPELINE_RULES.get(registro.status_pipeline, {}).get('results', [])).get(resultado_code, resultado_code)
+        registro.ultimo_contato = timezone.now()
+        registro.resultado_ultimo_contato = resultado_label
+        registro.proximo_passo = ''
+        registro.canal_contato = canal_contato
+        registro.status_pipeline = decision['next_status']
+
+        if decision.get('archive') or registro.status_pipeline == StatusPipelineChoices.ARQUIVADA.value:
+            registro.no_kanban = False
+
+        registro.save()
+
+        ContatoHistorico.objects.create(
+            registro=registro,
+            data_contato=registro.ultimo_contato,
+            resultado=resultado_label,
+            status_anterior=status_anterior,
+            status_novo=registro.status_pipeline,
+            usuario=request.user,
+            canal_contato=canal_contato,
+            checklist_itens=checklist_itens,
+        )
+
+        return redirect('kanban')
+
+    context = {
+        'registro': registro,
+        'canal_choices': CanalContatoChoices.choices,
+        'stage_config_json': json.dumps(stage_config_front),
+    }
+
+    return render(request, 'crm/registrar_contato.html', context)
+
+
+@login_required
+def registrar_contato_htmx(request, registro_id):
+    """Registra contato e retorna card atualizado para HTMX."""
+    registro = get_object_or_404(RegistroComercial, id=registro_id)
+    
+    # Verificar permissão
+    if not request.user.is_superuser and registro.vendedor != request.user:
+        return HttpResponse('Acesso negado', status=403)
+    
+    if request.method == 'POST':
+        resultado = request.POST.get('resultado', '').strip()
+        novo_status = request.POST.get('novo_status')
+        proximo_passo = request.POST.get('proximo_passo', '').strip()
+        checklist_itens = request.POST.getlist('checklist')
+        canal_contato = request.POST.get('canal_contato', registro.canal_contato)
+
+        allowed_statuses = allowed_transitions(registro.status_pipeline)
+        stage_cfg = STAGE_CONFIG.get(novo_status, {})
+
+        if canal_contato not in dict(CanalContatoChoices.choices):
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Canal de contato inválido.</div>',
+                status=400
+            )
+
+        if not novo_status:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Atualizar Status é obrigatório.</div>',
+                status=400
+            )
+
+        if novo_status not in dict(StatusPipelineChoices.choices):
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Status inválido.</div>',
+                status=400
+            )
+
+        if novo_status == registro.status_pipeline:
+            return HttpResponse(
+                f'<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">O novo status não pode ser igual ao status atual ({registro.get_status_pipeline_display()}).</div>',
+                status=400
+            )
+
+        if novo_status not in allowed_statuses:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Transição não permitida para este estágio.</div>',
+                status=400
+            )
+
+        if not resultado:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">O campo resultado é obrigatório.</div>',
+                status=400
+            )
+
+        if stage_cfg.get('require_next_step') and not proximo_passo and novo_status != StatusPipelineChoices.ARQUIVADA.value:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Selecione o Próximo Passo (lista fechada).</div>',
+                status=400
+            )
+
+        if proximo_passo and proximo_passo not in stage_cfg.get('next_steps', []) and novo_status != StatusPipelineChoices.ARQUIVADA.value:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Próximo passo inválido para este estágio.</div>',
+                status=400
+            )
+
+        if stage_cfg.get('require_checklist') and len(checklist_itens) == 0:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Marque ao menos um item do checklist.</div>',
+                status=400
+            )
+
+        if any(item not in stage_cfg.get('checklist', []) for item in checklist_itens):
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Checklist inválido para este estágio.</div>',
+                status=400
+            )
+
+        if novo_status == StatusPipelineChoices.NEGOCIACAO_COTACAO.value and not any(
+            item in checklist_itens for item in ['Cotação enviada', 'Follow-up realizado']
+        ):
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Registre Cotação enviada ou Follow-up realizado para entrar em Negociação/Cotação.</div>',
+                status=400
+            )
+
+        if novo_status == StatusPipelineChoices.PEDIDO_REALIZADO.value and len(checklist_itens) == 0:
+            return HttpResponse(
+                '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">Confirme o pedido marcando itens do checklist.</div>',
+                status=400
+            )
+
+        if novo_status == StatusPipelineChoices.ARQUIVADA.value:
+            proximo_passo = ''
+
+        status_anterior = registro.status_pipeline
+
+        registro.ultimo_contato = timezone.now()
+        registro.resultado_ultimo_contato = resultado
+        registro.proximo_passo = proximo_passo
+        registro.canal_contato = canal_contato
+        registro.status_pipeline = novo_status
+
+        if novo_status == StatusPipelineChoices.ARQUIVADA.value:
+            registro.no_kanban = False
+
+        registro.save()
+
+        ContatoHistorico.objects.create(
+            registro=registro,
+            data_contato=registro.ultimo_contato,
+            resultado=resultado,
+            status_anterior=status_anterior,
+            status_novo=registro.status_pipeline,
+            usuario=request.user,
+            canal_contato=canal_contato,
+            checklist_itens=checklist_itens,
+        )
+
+        card_html = render_to_string('crm/_card.html', {'registro': registro})
+        response = HttpResponse(card_html)
+        response['HX-Trigger'] = json.dumps({
+            'cardUpdated': {
+                'cardId': str(registro.id),
+                'oldStatus': status_anterior,
+                'newStatus': novo_status,
+                'statusLabel': registro.get_status_pipeline_display()
+            }
+        })
+        return response
+
+    return HttpResponse('Método não permitido', status=405)
+
+
+@comercial_required
+@login_required(login_url='login')
+def metricas_view(request):
+    """View de métricas - apenas ADMIN."""
+    if not (request.user.is_superuser or request.user.groups.filter(name='Admin').exists()):
+        return redirect('login')
+    user = request.user
+    
+    from datetime import datetime, timedelta
+    
+    vendedor_filter = request.GET.get('vendedor')
+    periodo = request.GET.get('periodo', 'dia')  # Default: dia
+    origem_filter = request.GET.get('origem')  # Novo: filtro por origem
+    status_filter = request.GET.get('status')  # Novo: filtro por status
+    
+    # Calcular datas baseado no período
+    now = timezone.now()
+    today = now.date()
+    
+    if periodo == 'semana':
+        # Última semana (7 dias)
+        data_inicio = today - timedelta(days=7)
+    elif periodo == 'mes':
+        # Último mês (30 dias)
+        data_inicio = today - timedelta(days=30)
+    else:  # dia (padrão)
+        # Hoje apenas
+        data_inicio = today
+
+    # Filtrar por vendedor ou todos (se gestor)
+    if user.is_superuser or user.groups.filter(name='Admin').exists():
+        base_registros = RegistroComercial.objects.all()
+        contatos = ContatoHistorico.objects.all()
+
+        if vendedor_filter and vendedor_filter != 'todos':
+            base_registros = base_registros.filter(vendedor_id=vendedor_filter)
+            contatos = contatos.filter(usuario_id=vendedor_filter)
+
+        vendedores = User.objects.filter(groups__name='Comercial').distinct().order_by('first_name', 'username')
+    else:
+        base_registros = RegistroComercial.objects.filter(vendedor=user)
+        contatos = ContatoHistorico.objects.filter(usuario=user)
+        vendedores = []
+    
+    # Filtrar por período (considerando atualizado_em dos registros - atividade)
+    base_registros = base_registros.filter(atualizado_em__date__gte=data_inicio)
+    
+    # Métricas apenas de trabalho ativo (no_kanban=True OU status especial: Conta Ativa ou Arquivada)
+    registros = base_registros.filter(
+        Q(no_kanban=True) | 
+        Q(status_pipeline=StatusPipelineChoices.CONTA_ATIVA.value) |
+        Q(status_pipeline=StatusPipelineChoices.ARQUIVADA.value)
+    )
+    
+    # FILTROS AVANÇADOS
+    if origem_filter and origem_filter != '':
+        registros = registros.filter(origem=origem_filter)
+    
+    if status_filter and status_filter != '':
+        registros = registros.filter(status_pipeline=status_filter)
+    
+    # Backlog (aguardando entrada no Kanban)
+    backlog_count = base_registros.filter(no_kanban=False).exclude(
+        status_pipeline__in=[StatusPipelineChoices.CONTA_ATIVA.value, StatusPipelineChoices.ARQUIVADA.value]
+    ).count()
+    
+    # Métricas por status (pipeline)
+    metricas_status = {}
+    for status_enum, status_label in PIPELINE_SEQUENCE:
+        metricas_status[status_label] = registros.filter(status_pipeline=status_enum.value).count()
+    
+    total_leads = registros.count()
+    conta_para_contato = metricas_status.get(StatusPipelineChoices.CONTA_PARA_CONTATO.label, 0)
+    contatos_realizados = metricas_status.get(StatusPipelineChoices.CONTATO_FEITO.label, 0)
+    negociacoes = metricas_status.get(StatusPipelineChoices.NEGOCIACAO_COTACAO.label, 0)
+    pedidos = metricas_status.get(StatusPipelineChoices.PEDIDO_REALIZADO.label, 0)
+    contas_ativas = metricas_status.get(StatusPipelineChoices.CONTA_ATIVA.label, 0)
+
+    # Cidades e Estados onde estamos trabalhando - COM PAGINAÇÃO
+    cidades_estados_all = registros.values('cidade', 'uf').annotate(count=Count('id')).order_by('-count')
+    
+    paginator = Paginator(cidades_estados_all, 20)  # 20 cidades por página
+    page = request.GET.get('cidades_page')
+    
+    try:
+        cidades_estados = paginator.page(page)
+    except PageNotAnInteger:
+        cidades_estados = paginator.page(1)
+    except EmptyPage:
+        cidades_estados = paginator.page(paginator.num_pages)
+    
+    # Origem dos contatos
+    origem_stats = []
+    for origem_key, origem_label in OrigemChoices.choices:
+        count = registros.filter(origem=origem_key).count()
+        if count > 0:
+            origem_stats.append((origem_key, origem_label, count))
+    origem_stats.sort(key=lambda x: x[2], reverse=True)
+    
+    context = {
+        'metricas_status': metricas_status,
+        'total_leads': total_leads,
+        'conta_para_contato': conta_para_contato,
+        'contatos_realizados': contatos_realizados,
+        'negociacoes': negociacoes,
+        'pedidos': pedidos,
+        'contas_ativas': contas_ativas,
+        'cidades_estados': cidades_estados,
+        'cidades_paginator': paginator,
+        'cidades_page_obj': cidades_estados,
+        'origem_stats': origem_stats,
+        'backlog_count': backlog_count,
+        'vendedores': vendedores,
+        'vendedor_filter': vendedor_filter,
+        'origem_filter': origem_filter,  # Novo
+        'status_filter': status_filter,  # Novo
+        'status_choices': StatusPipelineChoices.choices,  # Novo
+        'origem_choices': OrigemChoices.choices,  # Novo
+        'periodo': periodo,
+        'is_admin_user': user.is_superuser or user.groups.filter(name='Admin').exists(),
+    }
+    
+    return render(request, 'crm/metricas.html', context)
+
+
+@admin_required
+@admin_required
+def gestao_usuarios(request):
+    """View para gestão de usuários e grupos."""
+    from django.contrib.auth.models import User, Group
+    
+    usuarios = User.objects.all().order_by('-date_joined')
+    grupos = Group.objects.all()
+    
+    # Paginação
+    paginator = Paginator(usuarios, 20)  # 20 usuários por página
+    page = request.GET.get('page')
+    
+    try:
+        usuarios_page = paginator.page(page)
+    except PageNotAnInteger:
+        usuarios_page = paginator.page(1)
+    except EmptyPage:
+        usuarios_page = paginator.page(paginator.num_pages)
+    
+    context = {
+        'usuarios': usuarios_page,
+        'paginator': paginator,
+        'page_obj': usuarios_page,
+        'grupos': grupos,
+    }
+    
+    return render(request, 'crm/gestao_usuarios.html', context)
+
+
+@comercial_required
+def meu_desempenho(request):
+    """Dashboard de desempenho personalizado do vendedor."""
+    user = request.user
+    
+    # Buscar registros do vendedor
+    registros = RegistroComercial.objects.filter(vendedor=user)
+    
+    # Métricas principais
+    total_leads = registros.count()
+    contatos_realizados = registros.filter(status_pipeline=StatusPipelineChoices.CONTATO_FEITO.value).count()
+    negociacoes = registros.filter(status_pipeline=StatusPipelineChoices.NEGOCIACAO_COTACAO.value).count()
+    pedidos = registros.filter(status_pipeline=StatusPipelineChoices.PEDIDO_REALIZADO.value).count()
+    contas_ativas = registros.filter(status_pipeline=StatusPipelineChoices.CONTA_ATIVA.value).count()
+    conta_para_contato = registros.filter(status_pipeline=StatusPipelineChoices.CONTA_PARA_CONTATO.value).count()
+    
+    taxa_contato = round((contatos_realizados / total_leads * 100) if total_leads > 0 else 0)
+    taxa_negociacao = round((negociacoes / contatos_realizados * 100) if contatos_realizados > 0 else 0)
+    taxa_pedido = round((pedidos / negociacoes * 100) if negociacoes > 0 else 0)
+    taxa_recorrencia = round((contas_ativas / pedidos * 100) if pedidos > 0 else 0)
+    
+    pct_conta_para_contato = round((conta_para_contato / total_leads * 100) if total_leads > 0 else 0)
+    pct_contato_realizado = round((contatos_realizados / total_leads * 100) if total_leads > 0 else 0)
+    pct_negociacao = round((negociacoes / total_leads * 100) if total_leads > 0 else 0)
+    pct_pedido = round((pedidos / total_leads * 100) if total_leads > 0 else 0)
+    pct_conta_ativa = round((contas_ativas / total_leads * 100) if total_leads > 0 else 0)
+    
+    # Origem dos leads
+    origem_stats = []
+    for origem_key, origem_label in OrigemChoices.choices:
+        count = registros.filter(origem=origem_key).count()
+        if count > 0:
+            origem_stats.append((origem_label, count))
+    
+    origem_stats.sort(key=lambda x: x[1], reverse=True)
+    
+    hoje = timezone.now()
+    
+    context = {
+        'total_leads': total_leads,
+        'contatos_realizados': contatos_realizados,
+        'negociacoes': negociacoes,
+        'pedidos': pedidos,
+        'contas_ativas': contas_ativas,
+        'contatos_realizados': contatos_realizados,
+        'conta_para_contato': conta_para_contato,
+        'taxa_contato': taxa_contato,
+        'taxa_negociacao': taxa_negociacao,
+        'taxa_pedido': taxa_pedido,
+        'taxa_recorrencia': taxa_recorrencia,
+        'pct_conta_para_contato': pct_conta_para_contato,
+        'pct_contato_realizado': pct_contato_realizado,
+        'pct_negociacao': pct_negociacao,
+        'pct_pedido': pct_pedido,
+        'pct_conta_ativa': pct_conta_ativa,
+        'origem_stats': origem_stats,
+        'hoje': hoje,
+    }
+    
+    return render(request, 'crm/meu_desempenho.html', context)
+
+
+@admin_required
+def importar_csv_view(request):
+    """View para importação de CSV."""
+    if request.method == 'POST' and request.FILES.get('csv_file'):
+        csv_file = request.FILES['csv_file']
+        
+        # SEGURANÇA: Validar tamanho do arquivo (máximo 5MB)
+        if csv_file.size > 5 * 1024 * 1024:
+            context = {
+                'error': 'Arquivo muito grande. Máximo 5MB.',
+                'origem_choices': OrigemChoices.choices,
+                'canal_choices': CanalContatoChoices.choices,
+            }
+            return render(request, 'crm/importar_csv.html', context)
+        
+        # SEGURANÇA: Validar extensão do arquivo
+        if not csv_file.name.endswith('.csv'):
+            context = {
+                'error': 'Arquivo deve ter extensão .csv',
+                'origem_choices': OrigemChoices.choices,
+                'canal_choices': CanalContatoChoices.choices,
+            }
+            return render(request, 'crm/importar_csv.html', context)
+        
+        # SEGURANÇA: Validar tipo MIME
+        allowed_mime_types = ['text/csv', 'application/vnd.ms-excel', 'text/plain']
+        if csv_file.content_type not in allowed_mime_types:
+            context = {
+                'error': 'Tipo de arquivo inválido. Envie um arquivo CSV válido.',
+                'origem_choices': OrigemChoices.choices,
+                'canal_choices': CanalContatoChoices.choices,
+            }
+            return render(request, 'crm/importar_csv.html', context)
+        
+        try:
+            decoded_file = csv_file.read().decode('utf-8').splitlines()
+            reader = csv.DictReader(decoded_file)
+            
+            importados = 0
+            erros = []
+            
+            for row in reader:
+                try:
+                    # Validar campos obrigatórios
+                    if not all([row.get('nome_empresa'), row.get('telefone'), 
+                               row.get('cidade'), row.get('uf'), row.get('origem'), row.get('canal_contato')]):
+                        erros.append(f"Linha com dados faltando: {row}")
+                        continue
+                    
+                    canal_contato = row.get('canal_contato', CanalContatoChoices.WHATSAPP)
+                    if canal_contato not in dict(CanalContatoChoices.choices):
+                        erros.append(f"Canal inválido na linha: {row}")
+                        continue
+
+                    # Criar registro
+                    RegistroComercial.objects.create(
+                        nome_empresa=row['nome_empresa'],
+                        telefone=row['telefone'],
+                        cidade=row['cidade'],
+                        uf=row['uf'],
+                        origem=row['origem'],
+                        canal_contato=canal_contato,
+                        codigo_winthor=row.get('codigo_winthor', ''),
+                        vendedor=request.user,
+                        status_pipeline=StatusPipelineChoices.CONTA_PARA_CONTATO.value
+                    )
+                    importados += 1
+                    
+                except Exception as e:
+                    erros.append(f"Erro na linha {row}: {str(e)}")
+            
+            context = {
+                'importados': importados,
+                'erros': erros,
+                'origem_choices': OrigemChoices.choices,
+                'canal_choices': CanalContatoChoices.choices,
+            }
+            
+            return render(request, 'crm/importar_csv.html', context)
+            
+        except Exception as e:
+            context = {
+                'error': f'Erro ao processar arquivo: {str(e)}',
+                'origem_choices': OrigemChoices.choices,
+                'canal_choices': CanalContatoChoices.choices,
+            }
+            return render(request, 'crm/importar_csv.html', context)
+    
+    context = {
+        'origem_choices': OrigemChoices.choices,
+        'canal_choices': CanalContatoChoices.choices,
+    }
+    return render(request, 'crm/importar_csv.html', context)
+
+
+@login_required
+@require_POST
+def desempenho_vendedor_api(request, vendedor_id):
+    """API endpoint para buscar desempenho de um vendedor específico ou de todos."""
+    from django.contrib.auth.models import User
+    from django.utils import timezone
+    from datetime import timedelta
+    import json
+    
+    # SEGURANÇA: Verificar se o usuário tem permissão de acessar estes dados
+    if not request.user.is_superuser and request.user.id != vendedor_id:
+        return JsonResponse({'error': 'Sem permissão para acessar dados deste vendedor'}, status=403)
+    
+    try:
+        # Se é admin, retornar dados de TODOS os vendedores
+        # Se não é admin, retornar apenas dados do próprio usuário
+        if request.user.is_superuser:
+            # Admin vê dados de todos
+            registros_query = RegistroComercial.objects.all()
+            vendedor_nome = "Todos os Vendedores"
+        else:
+            # Vendedor vê apenas seus próprios dados
+            registros_query = RegistroComercial.objects.filter(vendedor=request.user)
+            vendedor_nome = request.user.get_full_name() or request.user.username
+        
+        # Obter período do filtro
+        periodo = 'dia'  # padrão
+        if request.body:
+            try:
+                data = json.loads(request.body)
+                periodo = data.get('periodo', 'dia')
+            except:
+                pass
+        
+        # Calcular data de início baseado no período
+        hoje = timezone.now().date()  # Apenas a data, sem hora
+        
+        if periodo == 'dia':
+            # Filtra por registros de HOJE (mesma data, independente hora)
+            registros = registros_query.filter(
+                criado_em__date=hoje
+            ).distinct()
+        elif periodo == 'semana':
+            # Início da semana (segunda-feira) até agora
+            inicio_semana = hoje - timedelta(days=hoje.weekday())
+            registros = registros_query.filter(
+                criado_em__date__gte=inicio_semana
+            ).distinct()
+        elif periodo == 'mes':
+            # Início do mês até agora
+            inicio_mes = hoje.replace(day=1)
+            registros = registros_query.filter(
+                criado_em__date__gte=inicio_mes
+            ).distinct()
+        else:
+            # Default: dia
+            registros = registros_query.filter(
+                criado_em__date=hoje
+            ).distinct()
+        
+        total_leads = registros.count()
+        conta_para_contato = registros.filter(status_pipeline=StatusPipelineChoices.CONTA_PARA_CONTATO.value).count()
+        contatos_realizados = registros.filter(status_pipeline=StatusPipelineChoices.CONTATO_FEITO.value).count()
+        negociacoes = registros.filter(status_pipeline=StatusPipelineChoices.NEGOCIACAO_COTACAO.value).count()
+        pedidos = registros.filter(status_pipeline=StatusPipelineChoices.PEDIDO_REALIZADO.value).count()
+        contas_ativas = registros.filter(status_pipeline=StatusPipelineChoices.CONTA_ATIVA.value).count()
+        
+        taxa_contato = round((contatos_realizados / total_leads * 100) if total_leads > 0 else 0)
+        taxa_negociacao = round((negociacoes / contatos_realizados * 100) if contatos_realizados > 0 else 0)
+        taxa_pedido = round((pedidos / negociacoes * 100) if negociacoes > 0 else 0)
+        taxa_recorrencia = round((contas_ativas / pedidos * 100) if pedidos > 0 else 0)
+        
+        return JsonResponse({
+            'vendedor_nome': vendedor_nome,
+            'total_leads': total_leads,
+            'conta_para_contato': conta_para_contato,
+            'contatos_realizados': contatos_realizados,
+            'negociacoes': negociacoes,
+            'pedidos': pedidos,
+            'contas_ativas': contas_ativas,
+            'taxa_contato': taxa_contato,
+            'taxa_negociacao': taxa_negociacao,
+            'taxa_pedido': taxa_pedido,
+            'taxa_recorrencia': taxa_recorrencia,
+        })
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'Vendedor não encontrado'}, status=404)
+
+
+@comercial_required
+def carregar_mais_registros_api(request):
+    """API para carregar mais registros paginados."""
+    user = request.user
+    pagina = int(request.GET.get('page', 1))
+    local = request.GET.get('local', 'backlog')  # backlog ou status_key (ex: a_trabalhar)
+    registros_por_pagina = 8
+    offset = (pagina - 1) * registros_por_pagina
+    
+    # Filtrar registros por vendedor (a menos que seja gestor)
+    if user.is_superuser:
+        all_registros = RegistroComercial.objects.all()
+    else:
+        all_registros = RegistroComercial.objects.filter(vendedor=user)
+    
+    if local == 'backlog':
+        # Backlog: registros não ativos
+        registros = all_registros.filter(no_kanban=False).order_by('-criado_em')[offset:offset+registros_por_pagina]
+        total = all_registros.filter(no_kanban=False).count()
+    else:
+        # Status específico do Kanban
+        registros = all_registros.filter(
+            no_kanban=True, 
+            status_pipeline=local
+        ).exclude(status_pipeline=StatusPipelineChoices.ARQUIVADA.value).order_by('-ultimo_contato')[offset:offset+registros_por_pagina]
+        total = all_registros.filter(
+            no_kanban=True, 
+            status_pipeline=local
+        ).exclude(status_pipeline=StatusPipelineChoices.ARQUIVADA.value).count()
+    
+    # Renderizar cards HTML
+    cards_html = render_to_string('crm/partials/registro_cards.html', {
+        'registros': registros,
+        'local': local,
+    })
+    
+    return JsonResponse({
+        'html': cards_html,
+        'total': total,
+        'offset': offset + registros_por_pagina,
+        'tem_mais': (offset + registros_por_pagina) < total,
+    })
+
+
+@admin_required
+def arquivados_view(request):
+    """View para listar leads arquivados - ADMIN ONLY."""
+    user = request.user
+    
+    # Filtrar arquivados por vendedor (a menos que seja gestor)
+    if user.is_superuser:
+        arquivados = RegistroComercial.objects.filter(status_pipeline=StatusPipelineChoices.ARQUIVADA)
+    else:
+        arquivados = RegistroComercial.objects.filter(vendedor=user, status_pipeline=StatusPipelineChoices.ARQUIVADA)
+    
+    arquivados = arquivados.order_by('-atualizado_em')
+    
+    # Paginação
+    paginator = Paginator(arquivados, 15)  # 15 itens por página
+    page = request.GET.get('page')
+    
+    try:
+        arquivados_page = paginator.page(page)
+    except PageNotAnInteger:
+        arquivados_page = paginator.page(1)
+    except EmptyPage:
+        arquivados_page = paginator.page(paginator.num_pages)
+    
+    flash_success = request.session.pop('flash_success', None)
+    
+    context = {
+        'arquivados': arquivados_page,
+        'paginator': paginator,
+        'page_obj': arquivados_page,
+        'flash_success': flash_success,
+    }
+    
+    return render(request, 'crm/arquivados.html', context)
+
+
+@comercial_required
+def contas_ativas_view(request):
+    """Lista contas ativas (recorrência) fora do Kanban."""
+    user = request.user
+
+    if user.is_superuser:
+        contas = RegistroComercial.objects.filter(status_pipeline=StatusPipelineChoices.CONTA_ATIVA.value)
+    else:
+        contas = RegistroComercial.objects.filter(vendedor=user, status_pipeline=StatusPipelineChoices.CONTA_ATIVA.value)
+
+    contas = contas.order_by('-atualizado_em')
+    
+    # Paginação
+    paginator = Paginator(contas, 15)  # 15 itens por página
+    page = request.GET.get('page')
+    
+    try:
+        contas_page = paginator.page(page)
+    except PageNotAnInteger:
+        contas_page = paginator.page(1)
+    except EmptyPage:
+        contas_page = paginator.page(paginator.num_pages)
+
+    context = {
+        'contas': contas_page,
+        'paginator': paginator,
+        'page_obj': contas_page,
+    }
+
+    return render(request, 'crm/contas_ativas.html', context)
+
+
+@admin_required
+@require_POST
+def restaurar_lead(request, registro_id):
+    """Restaura um lead arquivado para A Trabalhar."""
+    registro = get_object_or_404(RegistroComercial, id=registro_id)
+    
+    # Verificar permissão
+    if not request.user.is_superuser and registro.vendedor != request.user:
+        return JsonResponse({'error': 'Sem permissão'}, status=403)
+    
+    # Restaurar para Conta para Contato
+    registro.status_pipeline = StatusPipelineChoices.CONTA_PARA_CONTATO.value
+    registro.no_kanban = True
+    registro.save()
+    
+    request.session['flash_success'] = f'Lead "{registro.nome_empresa}" restaurado com sucesso!'
+    return redirect('arquivados')
+
+
+@admin_required
+@require_POST
+def criar_usuario(request):
+    """Cria um novo usuário."""
+    from django.contrib.auth.models import User, Group
+    from django.contrib import messages
+    
+    username = request.POST.get('username')
+    email = request.POST.get('email')
+    first_name = request.POST.get('first_name')
+    password = request.POST.get('password')
+    grupo = request.POST.get('grupo')
+    
+    # Validar se usuário já existe
+    if User.objects.filter(username=username).exists():
+        messages.error(request, f'Usuário "{username}" já existe!')
+        return redirect('gestao_usuarios')
+    
+    # Criar usuário
+    user = User.objects.create_user(
+        username=username,
+        email=email,
+        first_name=first_name,
+        password=password or 'SenhaTemporaria123'
+    )
+    
+    # Adicionar ao grupo
+    if grupo:
+        group = Group.objects.get(name=grupo)
+        user.groups.add(group)
+    
+    messages.success(request, f'Usuário "{username}" criado com sucesso!')
+    return redirect('gestao_usuarios')
+
+
+@admin_required
+@require_POST
+def deletar_usuario(request, usuario_id):
+    """Deleta um usuário."""
+    from django.contrib.auth.models import User
+    from django.contrib import messages
+    
+    # Não permitir deletar a si mesmo
+    if request.user.id == usuario_id:
+        messages.error(request, 'Você não pode deletar sua própria conta!')
+        return redirect('gestao_usuarios')
+    
+    user = get_object_or_404(User, id=usuario_id)
+    username = user.username
+    user.delete()
+    
+    messages.success(request, f'Usuário "{username}" deletado com sucesso!')
+    return redirect('gestao_usuarios')

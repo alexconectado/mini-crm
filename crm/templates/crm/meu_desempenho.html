@@ -1,0 +1,91 @@
+{% extends 'crm/base.html' %}
+
+{% block title %}Meu Desempenho - Mini-CRM{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto p-4 md:p-6">
+    <div class="mb-4 flex flex-wrap items-center gap-3 justify-between">
+        <h1 class="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2"><i class="fa-solid fa-chart-column text-gray-700"></i><span>Meu Desempenho</span></h1>
+        <p class="text-gray-600 text-sm">{{ hoje|date:"d \d\e F \d\e Y" }}</p>
+        <a href="{% url 'kanban' %}" class="btn-primary">
+            <span class="inline-flex items-center gap-2"><i class="fa-solid fa-arrow-left"></i><span>Voltar ao Kanban</span></span>
+        </a>
+    </div>
+
+    <!-- KPIs Principais alinhados ao padrão de Métricas -->
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Total de Contas</div>
+            <div class="text-xl font-bold text-blue-600">{{ total_leads }}</div>
+            <p class="text-[11px] text-gray-500 mt-1">trabalho ativo</p>
+        </div>
+
+        <div class="card p-3 border-l-4 border-orange-500">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Backlog</div>
+            <div class="text-xl font-bold text-orange-600">{{ backlog_count }}</div>
+            <p class="text-[11px] text-gray-500 mt-1">aguardando Kanban</p>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Conta para Contato</div>
+            <div class="text-xl font-bold text-gray-800">{{ conta_para_contato }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Contato Feito</div>
+            <div class="text-xl font-bold text-green-600">{{ contatos_realizados }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Negociação / Cotação</div>
+            <div class="text-xl font-bold text-yellow-600">{{ negociacoes }}</div>
+        </div>
+
+        <div class="card p-3">
+            <div class="text-gray-600 text-[11px] font-medium mb-1">Pedido Realizado</div>
+            <div class="text-xl font-bold text-green-700">{{ pedidos }}</div>
+        </div>
+    </div>
+
+    <!-- Secções alinhadas ao layout de Métricas: Cidades/Estados e Origem -->
+    <div class="grid md:grid-cols-2 gap-4">
+        <!-- Cidades e Estados -->
+        <div class="card p-4">
+            <h3 class="text-base font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fa-solid fa-map-location-dot text-gray-600"></i><span>Cidades e Estados em Atuação</span></h3>
+            {% if cidades_estados %}
+            <div class="space-y-2 max-h-80 overflow-y-auto">
+                {% for item in cidades_estados %}
+                <div class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                    <div class="flex items-center gap-2">
+                        <span class="font-medium text-gray-800 text-sm">{{ item.cidade }}</span>
+                        <span class="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded font-semibold">{{ item.uf }}</span>
+                    </div>
+                    <span class="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded">{{ item.count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center text-gray-500 text-sm py-6">Nenhuma cidade registrada.</div>
+            {% endif %}
+        </div>
+
+        <!-- Origem -->
+        <div class="card p-4">
+            <h3 class="text-base font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fa-solid fa-chart-pie text-gray-600"></i><span>Origem dos Contatos</span></h3>
+            {% if origem_stats %}
+            <div class="space-y-2 max-h-80 overflow-y-auto">
+                {% for origem, count in origem_stats %}
+                <div class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                    <div class="text-xs font-medium text-gray-800 flex-1">{{ origem }}</div>
+                    <div class="text-sm font-bold text-green-700 bg-green-100 px-2 py-1 rounded ml-2 whitespace-nowrap">{{ count }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center text-gray-500 text-sm py-6">Sem dados de origem.</div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

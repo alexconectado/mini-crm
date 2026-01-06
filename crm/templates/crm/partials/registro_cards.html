@@ -1,0 +1,52 @@
+{% for registro in registros %}
+<div class="bg-white border border-gray-200 rounded-md p-2.5 hover:shadow transition cursor-move text-sm space-y-2"
+    draggable="true"
+    data-id="{{ registro.id }}"
+    @dragstart="dragStart($event, '{{ registro.id }}')"
+    @dragend="dragEnd($event)"
+    @dblclick="window.location.href='{% url 'registrar_contato' registro.id %}'">
+    
+    <div class="flex justify-between items-start mb-1">
+        <h4 class="font-semibold text-gray-800 text-sm leading-tight">{{ registro.nome_empresa }}</h4>
+        <span class="text-[11px] px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+            {{ registro.get_origem_display }}
+        </span>
+    </div>
+    
+    <div class="text-[11px] text-gray-600 space-y-0.5">
+        <div><i class="fa-solid fa-location-dot mr-1 text-gray-500"></i>{{ registro.cidade }}/{{ registro.uf }}</div>
+        <div><i class="fa-solid fa-phone mr-1 text-gray-500"></i>{{ registro.telefone }}</div>
+        <div class="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 font-semibold">
+            <i class="fa-solid fa-headset"></i>
+            <span>{{ registro.get_canal_contato_display }}</span>
+        </div>
+        <div><i class="fa-solid fa-user mr-1 text-gray-500"></i>{{ registro.vendedor.get_full_name|default:registro.vendedor.username }}</div>
+        {% if registro.ultimo_contato %}
+        <div class="text-blue-600 font-medium flex items-center gap-1">
+            <i class="fa-regular fa-clock"></i>
+            <span>Último: {{ registro.ultimo_contato|date:"d/m/Y H:i" }}</span>
+        </div>
+        {% endif %}
+        {% if registro.resultado_ultimo_contato %}
+        <div class="text-gray-700 italic text-[11px] mt-1 p-2 bg-gray-50 rounded">
+            "{{ registro.resultado_ultimo_contato|truncatewords:15 }}"
+        </div>
+        {% endif %}
+    </div>
+    
+    <div class="mt-2 flex gap-2">
+        <a href="{% url 'registrar_contato' registro.id %}" 
+           class="flex-1 btn-success btn-sm text-center">
+            <span class="inline-flex items-center gap-1 justify-center"><i class="fa-solid fa-pen-to-square"></i>Registrar</span>
+        </a>
+        <button @click="moverParaBacklog('{{ registro.id }}')"
+                class="btn-secondary btn-sm">
+            <span class="inline-flex items-center gap-1"><i class="fa-solid fa-arrow-left"></i>Backlog</span>
+        </button>
+        <button @click="arquivar('{{ registro.id }}')"
+                class="btn-danger btn-sm">
+            Arquivar
+        </button>
+    </div>
+</div>
+{% endfor %}

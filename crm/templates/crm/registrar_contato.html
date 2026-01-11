@@ -50,6 +50,28 @@
                             </p>
                         </div>
                     </div>
+                    <div class="border-t border-blue-200 pt-2">
+                        <p class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Perfil do Cliente</p>
+                        {% if registro.status_cliente == 'novo' %}
+                        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-sm">
+                            <i class="fa-solid fa-star"></i>
+                            <span>CLIENTE NOVO</span>
+                        </div>
+                        <p class="text-xs text-gray-600 mt-1">Em processo de qualificação inicial</p>
+                        {% elif registro.status_cliente == 'ativo' %}
+                        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-600 text-white font-bold text-sm">
+                            <i class="fa-solid fa-check-circle"></i>
+                            <span>CLIENTE ATIVO</span>
+                        </div>
+                        <p class="text-xs text-gray-600 mt-1">Cliente atual com relacionamento estabelecido</p>
+                        {% elif registro.status_cliente == 'inativo' %}
+                        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-500 text-white font-bold text-sm">
+                            <i class="fa-solid fa-pause-circle"></i>
+                            <span>CLIENTE INATIVO</span>
+                        </div>
+                        <p class="text-xs text-gray-600 mt-1">Requer reativação ou reconquista</p>
+                        {% endif %}
+                    </div>
                 </div>
 
                 {% if error %}

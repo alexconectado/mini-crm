@@ -278,10 +278,11 @@ def criar_registro(request):
             uf = request.POST.get('uf', '').strip().upper()
             origem = request.POST.get('origem', OrigemChoices.OUTROS)
             canal_contato = request.POST.get('canal_contato', CanalContatoChoices.WHATSAPP)
+            status_cliente = request.POST.get('status_cliente', 'novo').strip()
             codigo_winthor = request.POST.get('codigo_winthor', '').strip()
             
             print(f"Dados recebidos: nome={nome}, telefone={telefone}, cidade={cidade}, uf={uf}")
-            print(f"origem={origem}, canal={canal_contato}, winthor={codigo_winthor}")
+            print(f"origem={origem}, canal={canal_contato}, status={status_cliente}, winthor={codigo_winthor}")
             print(f"User: {request.user}, is_authenticated: {request.user.is_authenticated}")
             
             # Validar dados obrigatórios
@@ -292,6 +293,12 @@ def criar_registro(request):
                     return JsonResponse({'error': error_msg}, status=400)
                 # Retornar para kanban com mensagem de erro (será exibida pelo JavaScript)
                 return redirect('kanban')
+            
+            # Validar status_cliente
+            valid_status = ['novo', 'ativo', 'inativo']
+            if status_cliente not in valid_status:
+                print(f"Status do cliente inválido: {status_cliente}, usando 'novo'")
+                status_cliente = 'novo'
             
             # Validar origem
             if origem not in dict(OrigemChoices.choices):
@@ -312,6 +319,7 @@ def criar_registro(request):
                 uf=uf,
                 origem=origem,
                 canal_contato=canal_contato,
+                status_cliente=status_cliente,
                 codigo_winthor=codigo_winthor if codigo_winthor else None,
                 vendedor=request.user,
                 status_pipeline=StatusPipelineChoices.CONTA_PARA_CONTATO,

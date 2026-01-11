@@ -423,32 +423,29 @@ def registrar_contato(request, registro_id):
     pipeline_rules = PIPELINE_RULES.get(current_stage, {})
     
     # ✅ FORMATO FINAL: Array de {key, label, next_status_label} (Opção A canônica)
-    # Se estamos em "Conta para Contato", usar opções conforme status_cliente
+    # Usar configurações do banco com fallback para hardcoded
+    from .funil_config_utils import obter_resultados_config, obter_proximos_passos_config
+    
     if current_stage == 'CONTA_PARA_CONTATO':
-        # Carregar opções dinâmicas conforme status do cliente
-        valid_resultado_keys = RESULTADO_POR_STATUS_CLIENTE.get(registro.status_cliente, 
-                                                               RESULTADO_POR_STATUS_CLIENTE.get('novo', []))
+        # Carregar da config (com fallback)
+        results = obter_resultados_config(raw_status, registro.status_cliente)
     else:
         # Para outros estágios, usar opções do pipeline normal
         valid_resultado_keys = list(pipeline_rules.get('results', {}).keys())
-    
-    results = []
-    for k in valid_resultado_keys:
-        # Para "Conta para Contato", buscar next_stage do pipeline_rules (pode ter mudado)
-        if current_stage == 'CONTA_PARA_CONTATO':
-            next_stage = pipeline_rules.get('results', {}).get(k, 'CONTA_PARA_CONTATO')
-        else:
+        
+        results = []
+        for k in valid_resultado_keys:
             next_stage = pipeline_rules.get('results', {}).get(k, current_stage)
-        
-        # Converter estágio do pipeline para valor do banco antes de pegar label
-        db_next_stage = PIPELINE_TO_DB_MAP.get(next_stage, next_stage)
-        next_stage_label = dict(StatusPipelineChoices.choices).get(db_next_stage, db_next_stage)
-        
-        results.append({
-            "key": k,
-            "label": RESULT_LABELS.get(k, k),
-            "next_status_label": next_stage_label
-        })
+            
+            # Converter estágio do pipeline para valor do banco antes de pegar label
+            db_next_stage = PIPELINE_TO_DB_MAP.get(next_stage, next_stage)
+            next_stage_label = dict(StatusPipelineChoices.choices).get(db_next_stage, db_next_stage)
+            
+            results.append({
+                "key": k,
+                "label": RESULT_LABELS.get(k, k),
+                "next_status_label": next_stage_label
+            })
     
     checklist = [
         [item, CHECKLIST_LABELS.get(item, item)]

@@ -1,0 +1,157 @@
+{% extends 'crm/base.html' %}
+
+{% block title %}Configuração do Funil - Admin{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto p-4">
+    <div class="mb-4">
+        <h1 class="text-3xl font-bold text-gray-800">⚙️ Configuração do Funil</h1>
+        <p class="text-gray-600 mt-1">Customize opções de resultado e próximos passos por coluna e status do cliente</p>
+    </div>
+
+    <!-- Aviso de segurança -->
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+        <p class="text-sm text-yellow-800">
+            <strong>⚠️ Admin only:</strong> Alterações aqui afetam o que aparece no formulário de registro de contato.
+            A lógica de avanço do card continua controlada pelo pipeline automático.
+        </p>
+    </div>
+
+    <!-- Abas por coluna -->
+    <div x-data="{ activeColumn: 'conta_para_contato' }" class="space-y-4">
+        <!-- Seletores de aba -->
+        <div class="flex gap-2 overflow-x-auto pb-2">
+            {% for col_key, col_label in colunas.items %}
+            <button
+                @click="activeColumn = '{{ col_key }}'"
+                :class="activeColumn === '{{ col_key }}' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'"
+                class="px-4 py-2 rounded-lg font-medium whitespace-nowrap transition"
+            >
+                {{ col_label }}
+            </button>
+            {% endfor %}
+        </div>
+
+        <!-- Conteúdo por coluna -->
+        {% for col_key, col_label in colunas.items %}
+        <div x-show="activeColumn === '{{ col_key }}'" x-cloak class="space-y-4">
+            <!-- Grid por status do cliente -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {% for status_key, status_label in status_cliente_choices.items %}
+                {% with config=config_data|get_item:col_key|get_item:status_key %}
+                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow">
+                    <!-- Header -->
+                    <div class="bg-gradient-to-r from-blue-50 to-blue-100 p-3 border-b border-gray-200">
+                        <h3 class="font-bold text-gray-800">{{ status_label }}</h3>
+                        <p class="text-xs text-gray-600 mt-1">
+                            {{ config.resultado_ativos }} / {{ config.resultado_count }} resultados ativos
+                        </p>
+                    </div>
+
+                    <!-- Resultados -->
+                    <div class="p-3 space-y-2 border-b border-gray-100 max-h-60 overflow-y-auto">
+                        <p class="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Resultados</p>
+                        {% for resultado in config.resultados %}
+                        <div class="flex items-center justify-between p-2 rounded {% if resultado.ativo %}bg-green-50 border border-green-200{% else %}bg-gray-50 border border-gray-200{% endif %}">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-xs font-medium text-gray-800 truncate" title="{{ resultado.label }}">
+                                    {{ resultado.label }}
+                                </p>
+                                <p class="text-[10px] text-gray-600">{{ resultado.key }}</p>
+                            </div>
+                            <button
+                                @click="toggleResultado({{ resultado.id }}, !{{ resultado.ativo|lower }})"
+                                :class="!{{ resultado.ativo|lower }} ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'"
+                                class="ml-2 px-2 py-1 rounded text-xs font-semibold transition"
+                            >
+                                {% if resultado.ativo %}✓ Ativo{% else %}✕ Inativo{% endif %}
+                            </button>
+                        </div>
+                        {% empty %}
+                        <p class="text-xs text-gray-500 italic">Nenhum resultado configurado</p>
+                        {% endfor %}
+                    </div>
+
+                    <!-- Próximos passos -->
+                    <div class="p-3 space-y-2 max-h-40 overflow-y-auto">
+                        <p class="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Próximos Passos</p>
+                        {% for passo in config.passos %}
+                        <div class="flex items-center justify-between p-2 rounded {% if passo.ativo %}bg-blue-50 border border-blue-200{% else %}bg-gray-50 border border-gray-200{% endif %}">
+                            <p class="text-xs font-medium text-gray-800 truncate flex-1" title="{{ passo.label }}">
+                                {{ passo.label }}
+                            </p>
+                            <button
+                                @click="togglePasso({{ passo.id }}, !{{ passo.ativo|lower }})"
+                                :class="!{{ passo.ativo|lower }} ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'"
+                                class="ml-2 px-2 py-1 rounded text-xs font-semibold transition"
+                            >
+                                {% if passo.ativo %}✓{% else %}✕{% endif %}
+                            </button>
+                        </div>
+                        {% empty %}
+                        <p class="text-xs text-gray-500 italic">Nenhum próximo passo configurado</p>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endwith %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Informações úteis -->
+    <div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h3 class="font-bold text-blue-900 mb-2">📌 Notas Importantes</h3>
+        <ul class="text-sm text-blue-800 space-y-1">
+            <li>• Desativar um resultado vai removê-lo do formulário, mas não afeta registros já salvos</li>
+            <li>• A lógica de avanço de card é controlada pelo pipeline automático (não muda com essa config)</li>
+            <li>• Próximo passo é apenas informativo - NÃO move card</li>
+            <li>• Alterações são aplicadas imediatamente (com cache de 1 hora)</li>
+            <li>• Acesso admin permite editar via painel de administração Django</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+    async function toggleResultado(id, ativo) {
+        try {
+            const response = await fetch(`/crm/api/admin/toggle-resultado-ativo/${id}/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+                    'Content-Type': 'application/json'
+                }
+            });
+            const data = await response.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao atualizar: ' + (data.error || 'Desconhecido'));
+            }
+        } catch (error) {
+            alert('Erro: ' + error.message);
+        }
+    }
+
+    async function togglePasso(id, ativo) {
+        try {
+            const response = await fetch(`/crm/api/admin/toggle-passo-ativo/${id}/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+                    'Content-Type': 'application/json'
+                }
+            });
+            const data = await response.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao atualizar: ' + (data.error || 'Desconhecido'));
+            }
+        } catch (error) {
+            alert('Erro: ' + error.message);
+        }
+    }
+</script>
+{% endblock %}

@@ -5,6 +5,7 @@ Views para interface de configuração do funil.
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse
+from django.db import models
 from .models_config import FunilResultadoConfig, FunilProximoPassoConfig
 from .funil_config_utils import invalidar_cache_funil
 
@@ -23,12 +24,11 @@ def admin_required(view_func):
 def configuracao_funil(request):
     """Página de configuração do funil para admin."""
     
-    # Agrupar por coluna
+    # Agrupar por coluna (4 etapas)
     colunas = {
+        'lead': 'Lead',
         'conta_para_contato': 'Conta para Contato',
-        'contato_feito': 'Contato Feito',
         'negociacao_cotacao': 'Negociação / Cotação',
-        'pedido_realizado': 'Pedido Realizado',
         'conta_ativa': 'Conta Ativa',
     }
     
@@ -73,6 +73,207 @@ def configuracao_funil(request):
     }
     
     return render(request, 'crm/admin/configuracao_funil.html', context)
+
+
+@login_required
+@admin_required
+def criar_resultado(request):
+    """API para criar novo resultado."""
+    if request.method == 'POST':
+        try:
+            coluna = request.POST.get('coluna_pipeline')
+            status = request.POST.get('status_cliente')
+            key = request.POST.get('key')
+            label = request.POST.get('label')
+            next_status = request.POST.get('next_status', '')
+            
+            if not all([coluna, status, key, label]):
+                return JsonResponse({'error': 'Campos obrigatórios faltando'}, status=400)
+            
+            # Verificar se já existe
+            if FunilResultadoConfig.objects.filter(coluna_pipeline=coluna, status_cliente=status, key=key).exists():
+                return JsonResponse({'error': 'Já existe resultado com essa chave'}, status=400)
+            
+            # Obter próxima ordem
+            max_ordem = FunilResultadoConfig.objects.filter(
+                coluna_pipeline=coluna, status_cliente=status
+            ).aggregate(models.Max('ordem'))['ordem__max'] or 0
+            
+            resultado = FunilResultadoConfig.objects.create(
+                coluna_pipeline=coluna,
+                status_cliente=status,
+                key=key,
+                label=label,
+                next_status_label=next_status,
+                ordem=max_ordem + 1,
+                ativo=True
+            )
+            
+            invalidar_cache_funil()
+            
+            return JsonResponse({
+                'success': True,
+                'id': resultado.id,
+                'message': 'Resultado criado com sucesso'
+            })
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+
+@login_required
+@admin_required
+def editar_resultado(request, resultado_id):
+    """API para editar resultado existente."""
+    if request.method == 'POST':
+        try:
+            resultado = FunilResultadoConfig.objects.get(id=resultado_id)
+            
+            key = request.POST.get('key')
+            label = request.POST.get('label')
+            next_status = request.POST.get('next_status', '')
+            
+            if key:
+                # Verificar duplicata (exceto o próprio)
+                if FunilResultadoConfig.objects.filter(
+                    coluna_pipeline=resultado.coluna_pipeline,
+                    status_cliente=resultado.status_cliente,
+                    key=key
+                ).exclude(id=resultado_id).exists():
+                    return JsonResponse({'error': 'Já existe resultado com essa chave'}, status=400)
+                resultado.key = key
+            
+            if label:
+                resultado.label = label
+            
+            resultado.next_status_label = next_status
+            resultado.save()
+            
+            invalidar_cache_funil()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Resultado atualizado com sucesso'
+            })
+        except FunilResultadoConfig.DoesNotExist:
+            return JsonResponse({'error': 'Resultado não encontrado'}, status=404)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+
+@login_required
+@admin_required
+def excluir_resultado(request, resultado_id):
+    """API para excluir resultado."""
+    if request.method == 'POST':
+        try:
+            resultado = FunilResultadoConfig.objects.get(id=resultado_id)
+            resultado.delete()
+            
+            invalidar_cache_funil()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Resultado excluído com sucesso'
+            })
+        except FunilResultadoConfig.DoesNotExist:
+            return JsonResponse({'error': 'Resultado não encontrado'}, status=404)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+
+@login_required
+@admin_required
+def criar_passo(request):
+    """API para criar novo próximo passo."""
+    if request.method == 'POST':
+        try:
+            coluna = request.POST.get('coluna_pipeline')
+            status = request.POST.get('status_cliente')
+            label = request.POST.get('label')
+            
+            if not all([coluna, status, label]):
+                return JsonResponse({'error': 'Campos obrigatórios faltando'}, status=400)
+            
+            # Obter próxima ordem
+            max_ordem = FunilProximoPassoConfig.objects.filter(
+                coluna_pipeline=coluna, status_cliente=status
+            ).aggregate(models.Max('ordem'))['ordem__max'] or 0
+            
+            passo = FunilProximoPassoConfig.objects.create(
+                coluna_pipeline=coluna,
+                status_cliente=status,
+                label=label,
+                ordem=max_ordem + 1,
+                ativo=True
+            )
+            
+            invalidar_cache_funil()
+            
+            return JsonResponse({
+                'success': True,
+                'id': passo.id,
+                'message': 'Próximo passo criado com sucesso'
+            })
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+
+@login_required
+@admin_required
+def editar_passo(request, passo_id):
+    """API para editar próximo passo existente."""
+    if request.method == 'POST':
+        try:
+            passo = FunilProximoPassoConfig.objects.get(id=passo_id)
+            
+            label = request.POST.get('label')
+            if label:
+                passo.label = label
+                passo.save()
+            
+            invalidar_cache_funil()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Próximo passo atualizado com sucesso'
+            })
+        except FunilProximoPassoConfig.DoesNotExist:
+            return JsonResponse({'error': 'Próximo passo não encontrado'}, status=404)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+
+@login_required
+@admin_required
+def excluir_passo(request, passo_id):
+    """API para excluir próximo passo."""
+    if request.method == 'POST':
+        try:
+            passo = FunilProximoPassoConfig.objects.get(id=passo_id)
+            passo.delete()
+            
+            invalidar_cache_funil()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Próximo passo excluído com sucesso'
+            })
+        except FunilProximoPassoConfig.DoesNotExist:
+            return JsonResponse({'error': 'Próximo passo não encontrado'}, status=404)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Método não permitido'}, status=405)
 
 
 @login_required

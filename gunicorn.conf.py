@@ -21,10 +21,12 @@ timeout = 30
 keepalive = 2
 
 # Logging
-accesslog = os.environ.get("GUNICORN_ACCESS_LOG", "/var/log/gunicorn/access.log")
-errorlog = os.environ.get("GUNICORN_ERROR_LOG", "/var/log/gunicorn/error.log")
-loglevel = "info"
+accesslog = os.environ.get("GUNICORN_ACCESS_LOG", "-")
+errorlog = os.environ.get("GUNICORN_ERROR_LOG", "-")
+loglevel = "debug"
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
+capture_output = True
+enable_stdio_inheritance = True
 
 # Process naming
 proc_name = "mini-crm"

@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>{% block title %}Mini-CRM Zandomax{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-SzlrxWriC3XoLwTZkR1Ih3yJQ2v1WQ4e6i5Z1d3yUksdQRVvoxMfo8ps8H1R9V6V5K8O2C5r5K5x1m6j0sXUmg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
@@ -17,6 +20,33 @@
             --warning: #f59e0b;
             --danger: #ef4444;
             --gray-border: #e5e7eb;
+        }
+
+        /* Prevenir overflow horizontal global */
+        body, html {
+            overflow-x: hidden !important;
+            max-width: 100vw !important;
+            width: 100%;
+        }
+
+        * {
+            box-sizing: border-box !important;
+        }
+
+        /* Forçar todos os containers flex e grid a respeitar limites */
+        .flex, .grid {
+            min-width: 0 !important;
+        }
+
+        /* ESCONDER SCROLLBAR HORIZONTAL COMPLETAMENTE */
+        body::-webkit-scrollbar-x,
+        *::-webkit-scrollbar-x {
+            display: none !important;
+        }
+        
+        body {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
         }
 
         /* Remove fundo escuro do autocomplete */
@@ -147,6 +177,8 @@
             border-radius: 0.625rem;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             transition: all 0.2s ease;
+            max-width: 100%;
+            overflow: hidden;
         }
         .card:hover {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -203,14 +235,14 @@
         }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50" style="overflow-x: hidden; max-width: 100vw;">
     <header class="bg-white" style="border-bottom: 2px solid var(--primary);">
-        <div class="w-full px-6 py-3 flex justify-between items-center">
-            <div class="flex items-center">
-                <div class="w-72 flex justify-center">
+        <div class="w-full px-3 py-3 flex justify-between items-center" style="max-width: 100vw; overflow: hidden;">
+            <div class="flex items-center overflow-hidden">
+                <div class="w-40 flex justify-center shrink-0">
                     <img src="https://zandomax.agilecdn.com.br/imgs/logo-zandomax-alta-1715871858.png" alt="Zandomax" class="h-7">
                 </div>
-                <nav class="flex gap-6 ml-8">
+                <nav class="flex gap-3 ml-4 overflow-x-auto" style="max-width: calc(100vw - 400px);">
                     <a href="{% url 'kanban' %}" class="text-gray-600 hover:text-[var(--primary)] font-medium transition-colors text-sm">Kanban</a>
                     <a href="{% url 'contas_ativas' %}" class="text-gray-600 hover:text-[var(--primary)] font-medium transition-colors text-sm">Contas Ativas</a>
                     {% if is_comercial_user and not is_admin_user %}
@@ -239,7 +271,7 @@
         </div>
     </header>
 
-    <main class="h-screen">
+    <main class="h-auto min-h-screen" style="overflow: auto; max-width: 100vw; padding-bottom: 100px;">
         {% block content %}{% endblock %}
     </main>
 

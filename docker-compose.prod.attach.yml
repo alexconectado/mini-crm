@@ -1,0 +1,46 @@
+services:
+  web:
+    build: .
+    container_name: crm_web_zandomax
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --config gunicorn.conf.py config.wsgi:application"
+    env_file:
+      - .env.prod
+    environment:
+      USE_POSTGRES: "True"
+      DEBUG: "False"
+      GUNICORN_BIND: "0.0.0.0:8000"
+      GUNICORN_ACCESS_LOG: "-"
+      GUNICORN_ERROR_LOG: "-"
+    networks:
+      - docker_docker_public
+      - docker_docker_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsSL", "-H", "Host: crm.zandomax.com.br", "http://localhost:8000/crm/login/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=docker_docker_public"
+      # HTTP router (para ACME challenge)
+      - "traefik.http.routers.crm-http.entrypoints=web"
+      - "traefik.http.routers.crm-http.rule=Host(`crm.zandomax.com.br`)"
+      - "traefik.http.routers.crm-http.service=crm"
+      # HTTPS router
+      - "traefik.http.routers.crm.entrypoints=websecure"
+      - "traefik.http.routers.crm.rule=Host(`crm.zandomax.com.br`)"
+      - "traefik.http.routers.crm.tls=true"
+      - "traefik.http.routers.crm.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.crm.service=crm"
+      # Service
+      - "traefik.http.services.crm.loadbalancer.server.port=8000"
+
+networks:
+  docker_docker_public:
+    external: true
+  docker_docker_internal:
+    external: true

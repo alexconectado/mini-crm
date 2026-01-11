@@ -32,10 +32,11 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-hq7tg^q35e)@u_
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 # Desenvolvimento: adicionar testserver para testes Django
-_allowed = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-if DEBUG:
-    _allowed.extend(['testserver', '0.0.0.0'])
-ALLOWED_HOSTS = _allowed
+# Hosts permitidos (separados por vírgula no .env)
+_allowed = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+# Sempre adicionar localhost e testserver para testes (mesmo em DEBUG=False)
+_allowed.extend(['testserver', 'localhost', '127.0.0.1', '0.0.0.0'])
+ALLOWED_HOSTS = list(set(_allowed))  # Remove duplicatas
 
 
 # Application definition
@@ -84,12 +85,26 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+USE_POSTGRES = os.environ.get('USE_POSTGRES', 'False') == 'True'
+
+if USE_POSTGRES:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('DB_NAME', 'crm_db'),
+            'USER': os.environ.get('DB_USER', 'crm_user'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+            'HOST': os.environ.get('DB_HOST', 'localhost'),
+            'PORT': int(os.environ.get('DB_PORT', '5432')),
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # Cache Configuration for Performance
 CACHES = {
@@ -138,6 +153,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# Static files collection target (required for collectstatic in production)
+STATIC_ROOT = os.environ.get('STATIC_ROOT', str(BASE_DIR / 'staticfiles'))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
@@ -152,9 +169,10 @@ LOGOUT_REDIRECT_URL = '/admin/login/'
 # These should be enabled when DEBUG=False (production)
 if not DEBUG:
     # HTTPS/SSL Settings
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    # Allow override via env to avoid healthcheck loops
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True') == 'True'
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True') == 'True'
+    CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True') == 'True'
     SECURE_HSTS_SECONDS = 31536000  # 1 ano
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
@@ -164,8 +182,25 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
 
+    # Behind reverse proxy (Traefik): trust forwarded proto/host
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+
+    # CSRF Trusted Origins: necessário quando servindo via HTTPS
+    # Se não for explicitamente definido por env, derivamos de ALLOWED_HOSTS
+    _csrf_env = os.environ.get('CSRF_TRUSTED_ORIGINS')
+    if _csrf_env:
+        CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_env.split(',') if o.strip()]
+    else:
+        CSRF_TRUSTED_ORIGINS = [
+            f"https://{host}"
+            for host in ALLOWED_HOSTS
+            if host not in ('localhost', '127.0.0.1')
+        ]
+
 # Session security
 SESSION_COOKIE_AGE = 3600  # 1 hora
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = True
+# CSRF_COOKIE_HTTPONLY deve ser False para permitir JavaScript acessar o token
+CSRF_COOKIE_HTTPONLY = False

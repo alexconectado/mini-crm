@@ -9,10 +9,9 @@ Define para cada estágio:
 
 # Labels humanizados para resultados
 RESULT_LABELS = {
-    "falou_com_decisor": "Falou com decisor",
-    "falou_com_porteiro": "Falou com porteiro/atendente",
-    "nao_atendeu": "Não atendeu",
-    "retornar_depois": "Retornar depois",
+    "contato_responsavel": "Falou com responsável (decisor ou setor de compras)",
+    "responsavel_indisponivel": "Responsável não disponível — solicitaram retorno",
+    "nao_atendeu": "Não atendeu após tentativas",
     "numero_invalido": "Número inválido",
     "interessado": "Interessado",
     "avaliando": "Avaliando",
@@ -23,6 +22,7 @@ RESULT_LABELS = {
     "recusou": "Recusou",
     "aceitou": "Aceitou proposta",
     "finalizado": "Finalizado",
+    "arquivado_automatico": "Arquivado automaticamente (limite de retornos atingido)",
 }
 
 # Labels humanizados para checklist
@@ -49,10 +49,9 @@ PIPELINE_RULES = {
             "resultado_contato",
         ],
         "results": {
-            "falou_com_decisor": "CONTATO_FEITO",
-            "falou_com_porteiro": "CONTATO_FEITO",
-            "nao_atendeu": "CONTA_PARA_CONTATO",
-            "retornar_depois": "CONTA_PARA_CONTATO",
+            "contato_responsavel": "CONTATO_FEITO",
+            "responsavel_indisponivel": "CONTA_PARA_CONTATO",
+            "nao_atendeu": "ARQUIVADO",
             "numero_invalido": "ARQUIVADO",
         },
     },

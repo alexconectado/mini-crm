@@ -1034,12 +1034,18 @@ def meu_desempenho(request):
 
 @admin_required
 def importar_csv_view(request):
-    """View para importação de CSV."""
-    if request.method == 'POST' and request.FILES.get('csv_file'):
-        csv_file = request.FILES['csv_file']
+    """View para importação de arquivos Excel (XLS/XLSX)."""
+    if request.method == 'POST' and request.FILES.get('excel_file'):
+        excel_file = request.FILES['excel_file']
+        status_cliente_global = request.POST.get('status_cliente', 'novo').strip()
+        
+        # Validar status_cliente
+        valid_status = ['novo', 'ativo', 'inativo']
+        if status_cliente_global not in valid_status:
+            status_cliente_global = 'novo'
         
         # SEGURANÇA: Validar tamanho do arquivo (máximo 5MB)
-        if csv_file.size > 5 * 1024 * 1024:
+        if excel_file.size > 5 * 1024 * 1024:
             context = {
                 'error': 'Arquivo muito grande. Máximo 5MB.',
                 'origem_choices': OrigemChoices.choices,
@@ -1048,64 +1054,81 @@ def importar_csv_view(request):
             return render(request, 'crm/importar_csv.html', context)
         
         # SEGURANÇA: Validar extensão do arquivo
-        if not csv_file.name.endswith('.csv'):
+        if not (excel_file.name.endswith('.xlsx') or excel_file.name.endswith('.xls')):
             context = {
-                'error': 'Arquivo deve ter extensão .csv',
+                'error': 'Arquivo deve ter extensão .xlsx ou .xls',
                 'origem_choices': OrigemChoices.choices,
                 'canal_choices': CanalContatoChoices.choices,
             }
             return render(request, 'crm/importar_csv.html', context)
         
         # SEGURANÇA: Validar tipo MIME
-        allowed_mime_types = ['text/csv', 'application/vnd.ms-excel', 'text/plain']
-        if csv_file.content_type not in allowed_mime_types:
+        allowed_mime_types = [
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel',
+            'application/octet-stream',
+        ]
+        if excel_file.content_type not in allowed_mime_types:
             context = {
-                'error': 'Tipo de arquivo inválido. Envie um arquivo CSV válido.',
+                'error': 'Tipo de arquivo inválido. Envie um arquivo Excel válido (.xlsx ou .xls).',
                 'origem_choices': OrigemChoices.choices,
                 'canal_choices': CanalContatoChoices.choices,
             }
             return render(request, 'crm/importar_csv.html', context)
         
         try:
-            decoded_file = csv_file.read().decode('utf-8').splitlines()
-            reader = csv.DictReader(decoded_file)
+            import openpyxl
+            
+            # Ler arquivo Excel
+            workbook = openpyxl.load_workbook(excel_file)
+            sheet = workbook.active
+            
+            # Pegar cabeçalhos (primeira linha)
+            headers = [cell.value for cell in sheet[1]]
             
             importados = 0
             erros = []
             
-            for row in reader:
+            # Processar linhas (pular cabeçalho)
+            for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
                 try:
+                    # Criar dict com dados da linha
+                    row_data = dict(zip(headers, row))
+                    
                     # Validar campos obrigatórios
-                    if not all([row.get('nome_empresa'), row.get('telefone'), 
-                               row.get('cidade'), row.get('uf'), row.get('origem'), row.get('canal_contato')]):
-                        erros.append(f"Linha com dados faltando: {row}")
+                    if not all([row_data.get('nome_empresa'), row_data.get('telefone'), 
+                               row_data.get('cidade'), row_data.get('uf'), 
+                               row_data.get('origem'), row_data.get('canal_contato')]):
+                        erros.append(f"Linha {row_idx}: dados faltando")
                         continue
                     
-                    canal_contato = row.get('canal_contato', CanalContatoChoices.WHATSAPP)
+                    canal_contato = row_data.get('canal_contato', CanalContatoChoices.WHATSAPP)
                     if canal_contato not in dict(CanalContatoChoices.choices):
-                        erros.append(f"Canal inválido na linha: {row}")
+                        erros.append(f"Linha {row_idx}: canal inválido '{canal_contato}'")
                         continue
 
-                    # Criar registro
+                    # Criar registro com status_cliente global
                     RegistroComercial.objects.create(
-                        nome_empresa=row['nome_empresa'],
-                        telefone=row['telefone'],
-                        cidade=row['cidade'],
-                        uf=row['uf'],
-                        origem=row['origem'],
+                        nome_empresa=row_data['nome_empresa'],
+                        telefone=str(row_data['telefone']),
+                        cidade=row_data['cidade'],
+                        uf=str(row_data['uf']),
+                        origem=row_data['origem'],
                         canal_contato=canal_contato,
-                        codigo_winthor=row.get('codigo_winthor', ''),
+                        status_cliente=status_cliente_global,
+                        codigo_winthor=row_data.get('codigo_winthor', ''),
                         vendedor=request.user,
                         status_pipeline=StatusPipelineChoices.CONTA_PARA_CONTATO.value
                     )
                     importados += 1
                     
                 except Exception as e:
-                    erros.append(f"Erro na linha {row}: {str(e)}")
+                    erros.append(f"Linha {row_idx}: {str(e)}")
             
             context = {
                 'importados': importados,
                 'erros': erros,
+                'status_aplicado': status_cliente_global,
                 'origem_choices': OrigemChoices.choices,
                 'canal_choices': CanalContatoChoices.choices,
             }

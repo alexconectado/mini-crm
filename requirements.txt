@@ -4,3 +4,4 @@ django-ratelimit==4.1.0
 django-redis==5.4.0
 redis==5.0.1
 psycopg2-binary==2.9.9
+openpyxl==3.1.2

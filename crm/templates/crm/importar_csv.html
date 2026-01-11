@@ -1,15 +1,18 @@
 {% extends 'crm/base.html' %}
 
-{% block title %}Importar CSV - Mini-CRM{% endblock %}
+{% block title %}Importar Excel - Mini-CRM{% endblock %}
 
 {% block content %}
 <div class="max-w-3xl mx-auto p-3 md:p-4">
     <div class="bg-white rounded-lg shadow-lg p-4">
-        <h2 class="text-xl font-bold text-gray-800 mb-3">Importar Registros via CSV</h2>
+        <h2 class="text-xl font-bold text-gray-800 mb-3">Importar Registros via Excel</h2>
 
         {% if importados %}
         <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
-            <span class="inline-flex items-center gap-2"><i class="fa-solid fa-circle-check"></i><span>{{ importados }} registro(s) importado(s) com sucesso!</span></span>
+            <span class="inline-flex items-center gap-2">
+                <i class="fa-solid fa-circle-check"></i>
+                <span>{{ importados }} registro(s) importado(s) com sucesso como <strong>"{{ status_aplicado }}"</strong>!</span>
+            </span>
         </div>
         {% endif %}
 
@@ -32,8 +35,8 @@
 
         <!-- Instruções -->
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
-            <h3 class="font-bold text-blue-800 mb-2">Formato do CSV</h3>
-            <p class="text-sm text-blue-700 mb-2">O arquivo CSV deve conter as seguintes colunas obrigatórias:</p>
+            <h3 class="font-bold text-blue-800 mb-2">Formato do Excel (XLS/XLSX)</h3>
+            <p class="text-sm text-blue-700 mb-2">O arquivo Excel deve conter as seguintes colunas obrigatórias:</p>
             <ul class="list-disc list-inside text-sm text-blue-700 space-y-1">
                 <li><strong>nome_empresa</strong> - Nome da empresa (obrigatório)</li>
                 <li><strong>telefone</strong> - Telefone de contato (obrigatório)</li>
@@ -43,6 +46,13 @@
                 <li><strong>canal_contato</strong> - Canal principal de contato (obrigatório)</li>
                 <li><strong>codigo_winthor</strong> - Código Winthor (opcional)</li>
             </ul>
+            
+            <div class="mt-3 bg-yellow-100 border border-yellow-300 rounded p-2">
+                <p class="text-sm text-yellow-800">
+                    <strong>⚠️ Importante:</strong> O <strong>status do cliente</strong> será aplicado automaticamente 
+                    para TODOS os registros conforme selecionado abaixo (não precisa coluna no arquivo).
+                </p>
+            </div>
             
             <div class="mt-2">
                 <p class="text-sm text-blue-700 font-medium mb-2">Valores válidos para <strong>origem</strong>:</p>
@@ -64,13 +74,44 @@
             </div>
         </div>
 
-        <!-- Exemplo CSV -->
+        <!-- Exemplo Excel -->
         <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3">
-            <h3 class="font-bold text-gray-800 mb-2">Exemplo de CSV:</h3>
-            <pre class="text-xs bg-gray-800 text-green-400 p-3 rounded overflow-x-auto">nome_empresa,telefone,cidade,uf,origem,canal_contato,codigo_winthor
-Empresa ABC Ltda,(11) 98765-4321,São Paulo,SP,google,whatsapp,
-Comércio XYZ,(21) 91234-5678,Rio de Janeiro,RJ,site,telefone,12345
-Distribuidora 123,(31) 99999-8888,Belo Horizonte,MG,indicacao,email,</pre>
+            <h3 class="font-bold text-gray-800 mb-2">Exemplo de estrutura do Excel:</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs">
+                    <thead class="bg-gray-700 text-white">
+                        <tr>
+                            <th class="px-2 py-1 border">nome_empresa</th>
+                            <th class="px-2 py-1 border">telefone</th>
+                            <th class="px-2 py-1 border">cidade</th>
+                            <th class="px-2 py-1 border">uf</th>
+                            <th class="px-2 py-1 border">origem</th>
+                            <th class="px-2 py-1 border">canal_contato</th>
+                            <th class="px-2 py-1 border">codigo_winthor</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white">
+                        <tr>
+                            <td class="px-2 py-1 border">Empresa ABC Ltda</td>
+                            <td class="px-2 py-1 border">(11) 98765-4321</td>
+                            <td class="px-2 py-1 border">São Paulo</td>
+                            <td class="px-2 py-1 border">SP</td>
+                            <td class="px-2 py-1 border">google</td>
+                            <td class="px-2 py-1 border">whatsapp</td>
+                            <td class="px-2 py-1 border"></td>
+                        </tr>
+                        <tr>
+                            <td class="px-2 py-1 border">Comércio XYZ</td>
+                            <td class="px-2 py-1 border">(21) 91234-5678</td>
+                            <td class="px-2 py-1 border">Rio de Janeiro</td>
+                            <td class="px-2 py-1 border">RJ</td>
+                            <td class="px-2 py-1 border">site</td>
+                            <td class="px-2 py-1 border">telefone</td>
+                            <td class="px-2 py-1 border">12345</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Formulário de Upload -->
@@ -78,14 +119,30 @@ Distribuidora 123,(31) 99999-8888,Belo Horizonte,MG,indicacao,email,</pre>
             {% csrf_token %}
             
             <div>
-                <label for="csv_file" class="block text-sm font-medium text-gray-700 mb-2">
-                    Selecione o arquivo CSV
+                <label for="status_cliente" class="block text-sm font-medium text-gray-700 mb-2">
+                    Status do Cliente para esta importação *
+                </label>
+                <select 
+                    name="status_cliente" 
+                    id="status_cliente" 
+                    required
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                    <option value="novo">Cliente Novo</option>
+                    <option value="ativo">Cliente Ativo</option>
+                    <option value="inativo">Cliente Inativo</option>
+                </select>
+                <p class="text-xs text-gray-600 mt-1">Todos os registros importados receberão este status automaticamente</p>
+            </div>
+            
+            <div>
+                <label for="excel_file" class="block text-sm font-medium text-gray-700 mb-2">
+                    Selecione o arquivo Excel
                 </label>
                 <input 
                     type="file" 
-                    name="csv_file" 
-                    id="csv_file" 
-                    accept=".csv"
+                    name="excel_file" 
+                    id="excel_file" 
+                    accept=".xlsx,.xls"
                     required
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             </div>
@@ -96,7 +153,7 @@ Distribuidora 123,(31) 99999-8888,Belo Horizonte,MG,indicacao,email,</pre>
                     class="flex-1 min-w-[180px] bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-5 rounded-lg transition">
                     <span class="inline-flex items-center gap-2 justify-center w-full">
                         <i class="fa-solid fa-upload"></i>
-                        <span>Importar CSV</span>
+                        <span>Importar Excel</span>
                     </span>
                 </button>
                 <a 

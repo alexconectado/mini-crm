@@ -1,10 +1,8 @@
 """
 Modelos de configuração do funil.
 
-Estes models NÃO alteram o core do sistema.
-Servem apenas como fonte de configuração para a UI.
-
-O motor de avanço (resolve_next_stage) continua usando PIPELINE_RULES.
+NOVA FUNCIONALIDADE: Configurar toda a lógica do pipeline pelo frontend!
+Admin pode definir visualmente para onde cada resultado leva o card.
 """
 
 from django.db import models
@@ -14,16 +12,16 @@ class FunilResultadoConfig(models.Model):
     """
     Configuração de resultados do contato por coluna e status do cliente.
     
-    Permite admin customizar quais opções aparecem no formulário.
-    NÃO muda lógica de avanço (PIPELINE_RULES é quem decide).
+    Permite admin customizar quais opções aparecem no formulário E para onde o card avança.
+    NOVA FUNCIONALIDADE: Configurar toda a lógica do pipeline pelo frontend!
     """
     
     COLUNA_CHOICES = [
+        ('lead', 'Lead'),
         ('conta_para_contato', 'Conta para Contato'),
-        ('contato_feito', 'Contato Feito'),
         ('negociacao_cotacao', 'Negociação / Cotação'),
-        ('pedido_realizado', 'Pedido Realizado'),
         ('conta_ativa', 'Conta Ativa'),
+        ('arquivado', 'Arquivado'),
     ]
     
     STATUS_CLIENTE_CHOICES = [
@@ -54,6 +52,22 @@ class FunilResultadoConfig(models.Model):
         max_length=150,
         verbose_name="Descrição",
         help_text="O que aparece no select do vendedor"
+    )
+    
+    proxima_coluna = models.CharField(
+        max_length=50,
+        choices=COLUNA_CHOICES + [('manter', 'Manter na mesma coluna')],
+        default='manter',
+        verbose_name="Próxima Coluna",
+        help_text="Para onde o card avança ao escolher este resultado"
+    )
+    
+    proximo_status_pipeline = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        verbose_name="Próximo Status Pipeline (interno)",
+        help_text="Status técnico do pipeline (auto-preenchido baseado na proxima_coluna)"
     )
     
     ativo = models.BooleanField(
@@ -96,14 +110,13 @@ class FunilProximoPassoConfig(models.Model):
     """
     Configuração de próximos passos por coluna e status do cliente.
     
-    NÃO move card. Apenas lista informativa.
+    Lista informativa de próximos passos (NÃO move card).
     """
     
     COLUNA_CHOICES = [
+        ('lead', 'Lead'),
         ('conta_para_contato', 'Conta para Contato'),
-        ('contato_feito', 'Contato Feito'),
         ('negociacao_cotacao', 'Negociação / Cotação'),
-        ('pedido_realizado', 'Pedido Realizado'),
         ('conta_ativa', 'Conta Ativa'),
     ]
     

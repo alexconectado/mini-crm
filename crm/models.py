@@ -97,6 +97,19 @@ class RegistroComercial(models.Model):
         verbose_name="Status no Pipeline"
     )
     
+    # Contexto Operacional
+    status_cliente = models.CharField(
+        max_length=20,
+        choices=[
+            ('novo', 'Cliente Novo'),
+            ('ativo', 'Cliente Ativo'),
+            ('inativo', 'Cliente Inativo'),
+        ],
+        default='novo',
+        verbose_name="Status do Cliente",
+        help_text="Contexto operacional que altera opções de resultado sem mudar o funil"
+    )
+    
     # Histórico de Contato
     ultimo_contato = models.DateTimeField(
         blank=True,

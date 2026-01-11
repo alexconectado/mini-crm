@@ -25,6 +25,29 @@ RESULT_LABELS = {
     "arquivado_automatico": "Arquivado automaticamente (limite de retornos atingido)",
 }
 
+# Opções de resultado conforme status do cliente
+# Usado em "Conta para Contato" para contexto operacional
+RESULTADO_POR_STATUS_CLIENTE = {
+    'novo': [
+        'contato_responsavel',
+        'responsavel_indisponivel',
+        'nao_atendeu',
+        'numero_invalido',
+    ],
+    'ativo': [
+        'contato_responsavel',
+        'em_negociacao',
+        'aceitou',
+        'aguardando_resposta',
+    ],
+    'inativo': [
+        'contato_responsavel',
+        'sem_interesse',
+        'sem_perfil',
+        'numero_invalido',
+    ],
+}
+
 # Labels humanizados para checklist
 CHECKLIST_LABELS = {
     "tentativa_contato_realizada": "Tentativa de contato realizada",

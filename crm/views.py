@@ -22,7 +22,7 @@ import json
 
 # Pipeline module (event-driven, automatic transitions)
 from crm.pipeline import resolve_next_stage, checklist_completo
-from crm.pipeline.rules import PIPELINE_RULES, RESULT_LABELS, CHECKLIST_LABELS
+from crm.pipeline.rules import PIPELINE_RULES, RESULT_LABELS, CHECKLIST_LABELS, RESULTADO_POR_STATUS_CLIENTE
 
 
 # Mapeamento de status: banco → chaves de PIPELINE_RULES (tradutor canônico)
@@ -423,9 +423,23 @@ def registrar_contato(request, registro_id):
     pipeline_rules = PIPELINE_RULES.get(current_stage, {})
     
     # ✅ FORMATO FINAL: Array de {key, label, next_status_label} (Opção A canônica)
+    # Se estamos em "Conta para Contato", usar opções conforme status_cliente
+    if current_stage == 'CONTA_PARA_CONTATO':
+        # Carregar opções dinâmicas conforme status do cliente
+        valid_resultado_keys = RESULTADO_POR_STATUS_CLIENTE.get(registro.status_cliente, 
+                                                               RESULTADO_POR_STATUS_CLIENTE.get('novo', []))
+    else:
+        # Para outros estágios, usar opções do pipeline normal
+        valid_resultado_keys = list(pipeline_rules.get('results', {}).keys())
+    
     results = []
-    for k in pipeline_rules.get('results', {}).keys():
-        next_stage = pipeline_rules['results'][k]
+    for k in valid_resultado_keys:
+        # Para "Conta para Contato", buscar next_stage do pipeline_rules (pode ter mudado)
+        if current_stage == 'CONTA_PARA_CONTATO':
+            next_stage = pipeline_rules.get('results', {}).get(k, 'CONTA_PARA_CONTATO')
+        else:
+            next_stage = pipeline_rules.get('results', {}).get(k, current_stage)
+        
         # Converter estágio do pipeline para valor do banco antes de pegar label
         db_next_stage = PIPELINE_TO_DB_MAP.get(next_stage, next_stage)
         next_stage_label = dict(StatusPipelineChoices.choices).get(db_next_stage, db_next_stage)
@@ -470,16 +484,30 @@ def registrar_contato(request, registro_id):
                 'checklist_json': json.dumps(checklist),
             })
 
-        # Validar resultado no ENUM do estágio
-        valid_results = pipeline_rules.get('results', {})
-        if resultado_code not in valid_results:
-            return render(request, 'crm/registrar_contato.html', {
-                'registro': registro,
-                'error': 'Resultado inválido para este estágio.',
-                'canal_choices': CanalContatoChoices.choices,
-                'results_json': json.dumps(results),
-                'checklist_json': json.dumps(checklist),
-            })
+        # Validar resultado no ENUM do estágio (com suporte a status_cliente)
+        if current_stage == 'CONTA_PARA_CONTATO':
+            # Para "Conta para Contato", validar apenas contra as opções do status_cliente
+            valid_resultado_keys = RESULTADO_POR_STATUS_CLIENTE.get(registro.status_cliente, 
+                                                                   RESULTADO_POR_STATUS_CLIENTE.get('novo', []))
+            if resultado_code not in valid_resultado_keys:
+                return render(request, 'crm/registrar_contato.html', {
+                    'registro': registro,
+                    'error': f'Resultado inválido para cliente {registro.status_cliente}.',
+                    'canal_choices': CanalContatoChoices.choices,
+                    'results_json': json.dumps(results),
+                    'checklist_json': json.dumps(checklist),
+                })
+        else:
+            # Para outros estágios, usar validação normal
+            valid_results = pipeline_rules.get('results', {})
+            if resultado_code not in valid_results:
+                return render(request, 'crm/registrar_contato.html', {
+                    'registro': registro,
+                    'error': 'Resultado inválido para este estágio.',
+                    'canal_choices': CanalContatoChoices.choices,
+                    'results_json': json.dumps(results),
+                    'checklist_json': json.dumps(checklist),
+                })
 
         # Converter checklist para dict {item: True}
         checklist_dict = {item: True for item in checklist_itens}

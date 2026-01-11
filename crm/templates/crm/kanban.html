@@ -246,6 +246,20 @@
                                     <div class="block text-[9px] px-1 py-0.5 rounded bg-blue-100 text-blue-800 font-medium text-center">
                                         {{ registro.get_origem_display }}
                                     </div>
+                                    <!-- Badge Status Cliente -->
+                                    {% if registro.status_cliente == 'novo' %}
+                                    <div class="block text-[9px] px-1 py-0.5 rounded bg-blue-500 text-white font-bold text-center">
+                                        ⭐ NOVO
+                                    </div>
+                                    {% elif registro.status_cliente == 'ativo' %}
+                                    <div class="block text-[9px] px-1 py-0.5 rounded bg-green-600 text-white font-bold text-center">
+                                        ✓ ATIVO
+                                    </div>
+                                    {% elif registro.status_cliente == 'inativo' %}
+                                    <div class="block text-[9px] px-1 py-0.5 rounded bg-gray-500 text-white font-bold text-center">
+                                        ⏸ INATIVO
+                                    </div>
+                                    {% endif %}
                                     {% if registro.data_retorno %}
                                     <div class="block text-[9px] px-1.5 py-0.5 rounded text-gray-900 font-semibold shadow-sm text-center bg-yellow-300">
                                         🏷️ Retornar em {{ registro.data_retorno|date:"d/m" }}
